@@ -199,5 +199,4 @@ The bundled tools' licence files are copied into `tools\` alongside them.
 
 ## License
 
-Copyright © 2026 Nick Morrissey.
-<!-- Choose a licence (e.g. MIT or Apache 2.0) and add a LICENSE file before publishing. -->
+Released under the [MIT License](LICENSE). Copyright © 2026 Nick Morrissey.
