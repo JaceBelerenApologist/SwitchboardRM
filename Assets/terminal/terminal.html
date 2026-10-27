@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+/*XTERM_CSS*/
+html, body { margin: 0; height: 100%; overflow: hidden; background: #1c1c21; }
+#t { position: absolute; left: 10px; top: 8px; right: 4px; bottom: 4px; }
+.xterm .xterm-viewport { scrollbar-width: thin; }
+</style>
+</head>
+<body>
+<div id="t"></div>
+<script>/*XTERM_JS*/</script>
+<script>/*FIT_JS*/</script>
+<script>
+(function () {
+  const host = window.chrome.webview;
+  const theme = /*THEME*/;
+  document.body.style.background = theme.background;
+
+  const term = new Terminal({
+    fontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
+    fontSize: 14,
+    cursorBlink: true,
+    scrollback: 10000,
+    theme: theme,
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  const box = document.getElementById('t');
+  term.open(box);
+
+  let cols = 0, rows = 0;
+  function refit() {
+    try { fit.fit(); } catch (e) { }
+    if (term.cols !== cols || term.rows !== rows) {
+      cols = term.cols; rows = term.rows;
+      host.postMessage({ t: 'size', cols: cols, rows: rows });
+    }
+  }
+  new ResizeObserver(refit).observe(box);
+
+  // keystrokes and native paste (Ctrl+V / Ctrl+Shift+V) go to ssh
+  term.onData(d => host.postMessage({ t: 'in', d: d }));
+
+  // copy: Ctrl+Shift+C, or Ctrl+C while text is selected (otherwise Ctrl+C interrupts as usual)
+  term.attachCustomKeyEventHandler(ev => {
+    if (ev.type !== 'keydown' || !ev.ctrlKey || ev.key.toLowerCase() !== 'c') return true;
+    if (!ev.shiftKey && !term.hasSelection()) return true;
+    if (term.hasSelection()) { host.postMessage({ t: 'copy', d: term.getSelection() }); term.clearSelection(); }
+    ev.preventDefault();
+    return false;
+  });
+
+  // right-click: copy the selection, or paste when nothing is selected (like Windows Terminal / PuTTY)
+  document.addEventListener('contextmenu', ev => {
+    ev.preventDefault();
+    if (term.hasSelection()) { host.postMessage({ t: 'copy', d: term.getSelection() }); term.clearSelection(); }
+    else host.postMessage({ t: 'paste' });
+  });
+
+  host.addEventListener('message', e => {
+    const m = e.data;
+    if (typeof m === 'string') { term.write(m); return; }
+    if (m.t === 'theme') { term.options.theme = m.theme; document.body.style.background = m.theme.background; }
+    else if (m.t === 'focus') term.focus();
+  });
+
+  refit();
+  host.postMessage({ t: 'ready', cols: term.cols, rows: term.rows });
+  term.focus();
+})();
+</script>
+</body>
+</html>

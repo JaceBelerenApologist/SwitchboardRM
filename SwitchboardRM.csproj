@@ -1,0 +1,108 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>SwitchboardRM</AssemblyName>
+    <RootNamespace>SwitchboardRM</RootNamespace>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- Version: bump this for each release (PATCH = fixes, MINOR = features, MAJOR = breaking changes)
+         and add a section to CHANGELOG.md. Shown on Settings > About and in the .exe's Properties > Details. -->
+    <Version>2.4.0</Version>
+    <Product>Switchboard Remote Manager</Product>
+    <Copyright>© 2026 Nick Morrissey</Copyright>
+    <Description>Switchboard Remote Manager</Description>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <!-- record source paths as \src\... in the .exe's debug info, not the real folder on the build PC -->
+    <PathMap>$(MSBuildProjectDirectory)=\src\SwitchboardRM</PathMap>
+    <!-- the .exe's own icon (Explorer, shortcuts, taskbar) -->
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!-- the same icon and logo built in, for window title bars and the splash -->
+  <ItemGroup>
+    <None Remove="Assets\**" />
+    <EmbeddedResource Include="Assets\app.ico" LogicalName="SwitchboardRM.app.ico" />
+    <EmbeddedResource Include="Assets\app.png" LogicalName="SwitchboardRM.app.png" />
+    <EmbeddedResource Include="CHANGELOG.md" LogicalName="SwitchboardRM.CHANGELOG.md" />
+    <!-- adds Entra's login_hint to aws-azure-login's sign-in page (see Tools.AzureLogin) -->
+    <EmbeddedResource Include="Assets\login-hint-shim.js" LogicalName="SwitchboardRM.login-hint-shim.js" />
+    <!-- the SSH terminal page: xterm.js 5.5.0 + fit add-on 0.10.0 (MIT, see Assets\terminal\LICENSE-xterm.txt) -->
+    <EmbeddedResource Include="Assets\terminal\terminal.html" LogicalName="SwitchboardRM.terminal.terminal.html" />
+    <EmbeddedResource Include="Assets\terminal\xterm.js" LogicalName="SwitchboardRM.terminal.xterm.js" />
+    <EmbeddedResource Include="Assets\terminal\xterm.css" LogicalName="SwitchboardRM.terminal.xterm.css" />
+    <EmbeddedResource Include="Assets\terminal\addon-fit.js" LogicalName="SwitchboardRM.terminal.addon-fit.js" />
+  </ItemGroup>
+
+  <!--
+    Publishing (publish.cmd, Visual Studio's "Output" publish profile, or `dotnet publish -c Release`) produces:
+
+      output\
+        SwitchboardRM.exe      the app, the AWS SDK and the .NET runtime in one file: nothing to install
+        tools\                 the bundled helpers from the project's tools\ folder, same layout
+          node\  aws-azure-login\  session-manager-plugin\  aws-cli\  ...
+  -->
+  <PropertyGroup>
+    <PublishDir>$(MSBuildProjectDirectory)\output\</PublishDir>
+  </PropertyGroup>
+  <!-- Release only, so everyday Debug builds stay small and quick. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- compile ahead of time so less code has to be compiled at start-up -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>embedded</DebugType> <!-- no loose .pdb in output\ -->
+  </PropertyGroup>
+
+  <!-- The helpers live in the project's tools\ folder (collect-tools.ps1 fills it) and are used from there while
+       developing. Keep them, and the output\ folder, out of the build and the Solution Explorer view. -->
+  <PropertyGroup>
+    <DefaultItemExcludes>$(DefaultItemExcludes);tools\**;output\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <!-- Before publishing: clear old files from output\ (tools\ is handled below, so it isn't recopied every time). -->
+  <Target Name="CleanOutputFolder" BeforeTargets="PrepareForPublish">
+    <ItemGroup>
+      <OldOutputFile Include="$(PublishDir)*.*" />
+    </ItemGroup>
+    <Delete Files="@(OldOutputFile)" ContinueOnError="true" />
+  </Target>
+
+  <!-- After publishing: mirror tools\ into output\tools\. Only changed files are copied, and anything you
+       removed from tools\ is removed from output\tools\ too. (robocopy exit codes below 8 mean success.) -->
+  <Target Name="MirrorTools" AfterTargets="Publish" Condition="Exists('$(MSBuildProjectDirectory)\tools')">
+    <Exec Command="robocopy &quot;$(MSBuildProjectDirectory)\tools&quot; &quot;$(PublishDir)tools&quot; /MIR /NFL /NDL /NJH /NJS /NP /R:1 /W:1 &amp; if errorlevel 8 (exit 1) else (exit 0)" />
+    <Message Importance="high" Text="Bundled tools mirrored into $(PublishDir)tools" />
+  </Target>
+  <Target Name="WarnNoTools" AfterTargets="Publish" Condition="!Exists('$(MSBuildProjectDirectory)\tools')">
+    <Warning Text="No tools\ folder: output\ has no bundled helpers. Run collect-tools.ps1 first if you want them." />
+  </Target>
+
+  <ItemGroup>
+    <!-- AWS SDK for .NET v4. After the first successful build you can pin these to the versions restored. -->
+    <PackageReference Include="AWSSDK.EC2" Version="4.*" />
+    <PackageReference Include="AWSSDK.SimpleSystemsManagement" Version="4.*" />
+    <PackageReference Include="AWSSDK.SecurityToken" Version="4.*" />
+    <!-- Only used by profiles that sign in with IAM Identity Center (SSO). -->
+    <PackageReference Include="AWSSDK.SSO" Version="4.*" />
+    <PackageReference Include="AWSSDK.SSOOIDC" Version="4.*" />
+    <!-- the browser control that shows the SSH terminal (uses the WebView2 runtime built into Windows 10/11) -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.*" />
+  </ItemGroup>
+
+  <!-- The WebView2 package also adds its WPF control. This is a WinForms app, so drop it: it isn't used, and it
+       causes warning MSB3277 (a WindowsBase version conflict between WPF and WinForms). -->
+  <Target Name="RemoveWebView2Wpf" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="'%(Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
+    </ItemGroup>
+  </Target>
+
+</Project>
