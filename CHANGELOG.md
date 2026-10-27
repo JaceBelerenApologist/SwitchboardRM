@@ -3,6 +3,16 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.4.1 (2026-10-27)
+
+- Release packaging: collect-tools.ps1 now also gathers the bundled tools' licences, so a release can be
+  redistributed: each tool's licence files go in its folder (or a LICENSE-NOTE.txt where the install has none),
+  aws-azure-login gets a THIRD-PARTY-NOTICES.txt listing every package with its licence text, and
+  tools\THIRD-PARTY-NOTICES.txt summarises all bundled tools with versions, licences and sources.
+- README: step-by-step installation, either from a release download or by installing the helper tools yourself
+  (Session Manager plugin, Node.js and aws-azure-login, AWS CLI, OpenSSH), first-time sign-in setup, and how to
+  build, release and update a bundle.
+
 ## 2.4.0 (2026-10-27)
 
 - Nothing organisation-specific is built into the app any more: no built-in Entra tenant ID, default profile name
