@@ -65,8 +65,8 @@ ordinary RDP and SSH connections (or imports them from RDCMan, mRemoteNG, `.rdp`
 - Windows 10 or 11, x64.
 - The Microsoft Edge WebView2 Runtime, for the SSH terminal only (included with Windows 10/11).
 - The OpenSSH Client, for SSH only (Windows Settings > Apps > Optional features), unless bundled in `tools\openssh\`.
-- Node.js, aws-azure-login, the Session Manager plugin and the AWS CLI are *not* needed if they were bundled
-  into `tools\` (see [Bundling the helper tools](#bundling-the-helper-tools)).
+- Node.js, aws-azure-login, the Session Manager plugin and the AWS CLI: included in the release download, or
+  installed yourself (see [Installation](#installation)).
 
 **To build**
 - The [.NET 10 SDK](https://dotnet.microsoft.com/download).
@@ -85,51 +85,65 @@ ordinary RDP and SSH connections (or imports them from RDCMan, mRemoteNG, `.rdp`
 | `ssm:TerminateSession` | ending sessions cleanly when a tab or the app closes |
 | `ec2:StartInstances`, `ec2:StopInstances`, `ec2:RebootInstances` | optional: start / stop / reboot |
 
-## Getting started
+## Installation
+
+There are two ways to get Switchboard running: download a release, which includes everything, or build it yourself
+and install the helper tools it uses.
+
+### Option A: download a release (helper tools included)
+
+1. Download `SwitchboardRM-<version>.zip` from [Releases](../../releases) and extract it anywhere, for example
+   `C:\Tools\SwitchboardRM`. Keep the `tools` folder next to `SwitchboardRM.exe`.
+2. Run `SwitchboardRM.exe`. It isn't code-signed, so Windows SmartScreen may ask you to confirm the first time
+   (**More info > Run anyway**).
+3. Set up an AWS profile and sign in (see [First-time sign-in setup](#first-time-sign-in-setup)).
+
+The release bundles Node.js, aws-azure-login, the Session Manager plugin and the AWS CLI in `tools\`, so nothing else
+needs installing. What's included, with versions and licences, is listed in `tools\THIRD-PARTY-NOTICES.txt`.
+
+### Option B: build it and install the helper tools yourself
+
+**1. Build Switchboard**
 
 ```powershell
 git clone <this repository>
 cd SwitchboardRM
-
-# optional but recommended: bundle the helper tools from this PC (see below)
-powershell -ExecutionPolicy Bypass -File .\collect-tools.ps1
-
-# build the finished app into .\output
-.\publish.cmd
+.\publish.cmd          # needs the .NET 10 SDK; the app lands in .\output
 ```
 
-`output\` then holds everything needed to run it:
+**2. Install the helper tools.** Switchboard finds installed copies on its own (on `PATH` or in their default folders).
 
-```
-output\
-  SwitchboardRM.exe          the app, the AWS SDK and the .NET runtime in one file
-  tools\                     the bundled helpers, if collected
-```
-
-Copy `output\` anywhere and run `SwitchboardRM.exe`. On first start, use **Add profile** (in the profile list,
-Settings, or the AWS menu) to set up an AWS profile, then **Sign in**. Existing profiles in `~/.aws` are picked up
-automatically.
-
-For development, open the folder in Visual Studio or VS Code and run it (`dotnet run`). Debug builds use the tools
-straight from the project's `tools\` folder.
-
-## Bundling the helper tools
-
-`collect-tools.ps1` copies the helpers installed on the current PC into `tools\`, one subfolder each, with their
-licence files. Publishing mirrors `tools\` into `output\tools\`, and the app uses those copies before anything
-installed on the PC.
-
-| Folder | Contents | Needed for |
+| Tool | Needed for | How to install |
 |---|---|---|
-| `tools\node\` | `node.exe` | running aws-azure-login |
-| `tools\aws-azure-login\` | the npm package and its `node_modules` | Microsoft Entra sign-in |
-| `tools\session-manager-plugin\` | `session-manager-plugin.exe` | every AWS connection |
-| `tools\aws-cli\` | AWS CLI v2 | SSO profiles only |
-| `tools\chromium\` | Chromium, with `-IncludeChromium` | optional browser for the sign-in page |
-| `tools\openssh\` | an OpenSSH build, added by hand | optional; otherwise Windows' OpenSSH is used |
+| AWS Session Manager plugin | every AWS connection | Install it with the Windows installer from AWS: [Install the Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/install-plugin-windows.html). Check with `session-manager-plugin --version`. |
+| Node.js (LTS) | Microsoft Entra sign-in | Install from [nodejs.org](https://nodejs.org). Then, in a **new** terminal, `npm install -g aws-azure-login` and check with `aws-azure-login --version`. Installing it also downloads a browser for Puppeteer into `%USERPROFILE%\.cache\puppeteer`. |
+| AWS CLI v2 | IAM Identity Center (SSO) profiles only | Install with the Windows installer: [Install the AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html). |
+| OpenSSH Client | SSH sessions only | Usually already present. If not: Windows Settings > System > Optional features > OpenSSH Client, or `Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0` in an admin PowerShell. |
+| WebView2 Runtime | SSH sessions only | Included with Windows 10/11. If missing, install the Evergreen runtime from Microsoft's WebView2 page. |
 
-Run the script on a PC where Node.js (`npm install -g aws-azure-login`), the Session Manager plugin and the AWS CLI
-are installed and working, and re-run it after updating any of them.
+**3. Run** `output\SwitchboardRM.exe` and continue with the first-time sign-in setup below.
+
+For development, open the folder in Visual Studio or VS Code and run it (`dotnet run`).
+
+### First-time sign-in setup
+
+Existing profiles in `~/.aws` are picked up automatically. To add one, use **Add profile** (bottom of the profile
+list on the toolbar, Settings > AWS profile, or the AWS menu):
+
+- **Microsoft sign-in (aws-azure-login)** opens a setup window that runs `aws-azure-login --configure`. Have these ready:
+
+  | Question | Answer |
+  |---|---|
+  | Azure Tenant ID | your organisation's Microsoft Entra tenant ID (from your administrator; the window shows it if another profile on the PC already has one) |
+  | Azure App ID URI | the AWS app's identifier in Entra, usually `urn:amazon:webservices` |
+  | Default Username | the account to sign in with. Switchboard also asks Entra for this account, so a separate admin account isn't swapped for the one signed in to Windows. |
+  | Default Role ARN | blank if you only have one AWS role, otherwise the role to use |
+  | Session hours | how long a sign-in lasts (up to the maximum your AWS role allows), e.g. `1` |
+  | Stay logged in | `true`, so Switchboard can renew the sign-in in the background |
+
+- **AWS IAM Identity Center (SSO)** opens `aws configure sso` in a console window. Have your SSO start URL and region ready.
+
+When the setup window is done, click **Sign in**.
 
 ## Usage notes
 
@@ -159,6 +173,52 @@ are installed and working, and re-run it after updating any of them.
   happened but not its contents.
 - Direct (saved) RDP connections verify the server certificate and warn if it can't be verified, like `mstsc`.
 - Removing a profile backs up `~/.aws/config` and `~/.aws/credentials` first (`*.switchboard-backup`).
+
+## Building a release with bundled tools
+
+For maintainers who publish the ready-to-run download (Option A).
+
+1. On the build PC, install the helper tools as in [Option B](#option-b-build-it-and-install-the-helper-tools-yourself).
+2. Collect them, with their licences, into `tools\`:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\collect-tools.ps1            # add -IncludeChromium for Chromium
+   ```
+
+   | File or folder | Contents |
+   |---|---|
+   | `tools\THIRD-PARTY-NOTICES.txt` | every bundled tool with its version, licence and source, and where its licence files are |
+   | `tools\node\` | `node.exe` and Node's `LICENSE` (which also covers what's built into `node.exe`, such as OpenSSL) |
+   | `tools\aws-azure-login\` | the package and its `node_modules`; `THIRD-PARTY-NOTICES.txt` lists every package with its version, licence and licence text |
+   | `tools\session-manager-plugin\` | the plugin with its `LICENSE` and `NOTICE` |
+   | `tools\aws-cli\` | AWS CLI v2 with its licence files |
+   | `tools\chromium\` | only with `-IncludeChromium` |
+   | `tools\openssh\` | only if you put an OpenSSH build there by hand; the script leaves it as is |
+
+   Where a tool's installation has no licence file, the script writes a `LICENSE-NOTE.txt` naming the licence and
+   where to read it.
+3. Run `.\publish.cmd`. `output\` then holds `SwitchboardRM.exe` and `tools\`.
+4. Zip `output\` as `SwitchboardRM-<version>.zip` and attach it to a GitHub Release tagged `v<version>`, with that
+   version's notes from [CHANGELOG.md](CHANGELOG.md). Don't commit `tools\` or `output\` to the repository.
+
+### Keeping the bundled tools up to date
+
+People who download a release run the tool versions you collected, so refresh them regularly. Node.js and Chromium
+in particular get frequent security fixes.
+
+- **Node.js:** install the newer LTS.
+- **aws-azure-login:** `npm update -g aws-azure-login`
+- **Session Manager plugin, AWS CLI:** install their newer Windows installers.
+- Then re-run `collect-tools.ps1`, publish, and release it as a new PATCH version. Settings > About in the app lists
+  the bundled versions.
+
+### Licences of the bundled tools
+
+All of the bundled tools are open source under permissive licences that allow redistribution, provided their licence
+files go with them: Node.js (MIT, plus its components' licences), aws-azure-login (MIT) and its dependencies (MIT,
+Apache 2.0, BSD, ISC and similar), the Session Manager plugin and AWS CLI (Apache 2.0), and Chromium (BSD, plus its
+components' licences). `collect-tools.ps1` puts the licence files in each tool's folder and writes the notices. If you
+bundle Puppeteer's "Chrome for Testing" build, check Google's terms for it as well.
 
 ## How it works
 
@@ -195,7 +255,8 @@ that break existing setups. The version is set in `SwitchboardRM.csproj`, and ev
 | [Session Manager plugin](https://github.com/aws/session-manager-plugin) | Apache 2.0 | tunnels (bundled) |
 | [AWS CLI v2](https://github.com/aws/aws-cli) | Apache 2.0 | SSO sign-in (bundled) |
 
-The bundled tools' licence files are copied into `tools\` alongside them.
+The bundled tools' licence files and notices are in `tools\` (see
+[Licences of the bundled tools](#licences-of-the-bundled-tools)).
 
 ## License
 
