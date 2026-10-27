@@ -1,110 +1,203 @@
-# Switchboard Remote Manager (Switchboard RM)
+<p align="center">
+  <img src="Assets/app.png" alt="Switchboard Remote Manager" width="112">
+</p>
 
-Formerly "AWS RDP Launcher". Version 2.0 copies 1.x settings, saved connections and saved passwords across on
-first start; the old copies are left in place.
+<h1 align="center">Switchboard Remote Manager</h1>
 
-Lists the EC2 instances Systems Manager (Fleet Manager) manages in ca-central-1 and ca-west-1,
-and opens each one in a tab inside the app using a hidden Session Manager tunnel.
+<p align="center">
+  Remote Desktop and SSH in tabs, to your AWS servers through Systems Manager and to any other machine directly.
+  <br>
+  A single self-contained Windows app: no AWS console, no open inbound ports, no VPN.
+</p>
 
-To build: the .NET 10 SDK. To run the published app: nothing, if `tools` was collected first
-(see "Shipping it without installs" below); the .exe carries its own .NET runtime. Otherwise it uses installed copies of the AWS Session Manager
-plugin and aws-azure-login (the "Set up..." step installs the latter through Node.js).
-The AWS CLI is only needed for profiles that sign in with `aws sso login`.
+---
 
-## Run it
-1. Unzip this folder, then in VS Code use File > Open Folder and pick it.
-2. Terminal > New Terminal, type `dotnet run`, press Enter.
-   The first build downloads the AWS SDK packages from NuGet, so it takes a little longer.
+Switchboard RM lists your EC2 instances across the AWS regions you choose and opens each one in a tab, over a
+hidden [AWS Systems Manager Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html)
+tunnel. Windows servers open in Remote Desktop, Linux servers in an embedded SSH terminal. It also keeps your
+ordinary RDP and SSH connections (or imports them from RDCMan, mRemoteNG, `.rdp` files and PuTTY) in the same place.
 
-## Make the finished app
-Double-click `publish.cmd` (or in Visual Studio: right-click the project > Publish > "Output",
-or in a terminal: `dotnet publish -c Release`). Everything lands in `output\` next to the project:
+<!-- Screenshots: add a couple here, e.g. ![Main window](docs/main-window.png) -->
 
-    output\
-      SwitchboardRM.exe          the app with the AWS SDK and .NET built in: nothing to install
-      tools\
-        node\                     node.exe
-        aws-azure-login\          the package and its node_modules
-        session-manager-plugin\   session-manager-plugin.exe
-        aws-cli\                  AWS CLI v2
-        chromium\                 only if collected with -IncludeChromium
+## Features
 
-Copy the whole `output` folder to any Windows 10/11 x64 PC and make a shortcut to the .exe.
-Publishing again replaces the .exe and only copies tool files that changed.
+**Connecting**
+- Remote Desktop and SSH sessions in tabs, side by side.
+- AWS servers are reached through Session Manager port forwarding (3389 for RDP, 22 for SSH), so they need the SSM
+  agent but no public IP, inbound security-group rules or bastion host.
+- The remote desktop resizes with the window (dynamic resolution on Windows Server 2012 R2 and newer).
+- Embedded SSH terminal: Windows' own OpenSSH client in a pseudo-console, shown with xterm.js. Your `~/.ssh` keys,
+  the Windows SSH agent, `~/.ssh/config` and `known_hosts` work as usual. Host keys for AWS servers are remembered by
+  instance ID, so the tunnel's changing local port never triggers host-key warnings.
+- Linux servers default to SSH and Windows servers to RDP; Server > Connect with SSH / Remote Desktop overrides it.
 
-## Using it
-- Opens, checks your AWS sign-in, and loads the list. If you're signed out it starts the Microsoft sign-in.
-  The right end of the toolbar shows who you're signed in as (or "Not signed in").
-- Toolbar, left: the **list** icon shows or hides the server list (pressed = shown; also Ctrl+L) and the
-  **refresh** icon (F5) reloads the servers without signing in again.
-- Toolbar, after the divider: **AWS profile** picks which AWS account/profile to use ("Add profile ..." at the
-  bottom of the list sets up a new one); **Sign in** gets fresh
-  AWS access through the Microsoft sign-in page (lasts about an hour).
-- Double-click (or press Enter on) a server to connect. Each server gets a tab.
-- The remote desktop follows the window size: resize the window and the remote resolution changes to fit
-  (Windows Server 2012 R2 or newer; older servers get a scaled picture instead).
-- Close a tab with its × button, middle-click, or right-click > Close tab. The tunnel and the AWS session close with it.
-- Hiding the server list lets the remote desktop take the space.
-- The list shows every EC2 instance (except terminated ones) plus anything else Systems Manager manages.
-  **Status**: Online (green, can connect), Agent offline (red: running but the SSM agent isn't answering),
-  Starting / Stopping (amber), Stopped, or "Running, no SSM" (no agent, so it can't be reached from here).
-  Tick **Hide offline** to show only servers you can connect to.
-- **Connect**, **Start**, **Stop** and **Reboot** are on the toolbar, in the **Server** menu, and on the
-  right-click menu; they act on the selected server and are only enabled when they make sense.
-  Right-click a server to **Start**, **Stop** or **Reboot** it (needs ec2:StartInstances / StopInstances /
-  RebootInstances), connect, or copy its ID or IP. The Status column follows the change live.
-  Double-clicking a stopped server offers to start it and connects once it's online.
-- **Saved RDP connections** (not AWS): the **+** button, Server > Add RDP connection, or right-click the list.
-  They have their own **Saved RDP** tab next to **AWS servers** (Ctrl+1 / Ctrl+2), connect directly (no tunnel, no AWS sign-in), and their Status shows
-  whether the RDP port answers. Each can sign in as its own user or the default one. They're stored in
-  `%APPDATA%\SwitchboardRM\connections.json`, separate from the settings; passwords stay in Credential Manager.
-- **SSH**: Linux servers open in an SSH terminal tab (Windows ones in Remote Desktop); Server > Connect with
-  SSH / Remote Desktop overrides that. AWS servers are reached through the Session Manager tunnel to port 22,
-  so they need sshd and your key but no open inbound ports. It runs Windows' own `ssh.exe` (Windows Settings >
-  Apps > Optional features > OpenSSH Client) in an embedded terminal, so your `~/.ssh` keys, the Windows SSH
-  agent and `known_hosts` work as usual; host keys for AWS servers are remembered by instance ID.
-  Copy: select text (or Ctrl+Shift+C); paste: Ctrl+V or right-click. Press Enter in an ended session to reconnect.
-  Settings > SSH: the user name for AWS servers (blank = guessed from the OS) and an optional key file.
-  To ship a specific OpenSSH build, put it in `tools\openssh\`.
-- **Import connections** (File or Server menu): from RDCMan `.rdg` files, `.rdp` files, mRemoteNG's
-  `confCons.xml`, or PuTTY's saved sessions. Address, port, user, name and group are imported (not passwords),
-  and anything already saved is skipped, so importing again is safe.
-- Click a column header to sort. Drag headers to reorder columns (Name always stays first), and right-click
-  the headers to choose which columns are shown or to reset them. Order, choice and widths are remembered.
+**AWS servers**
+- Lists every EC2 instance (except terminated ones) and anything else Systems Manager manages, across chosen regions.
+- Live status: Online, Agent offline, Starting, Stopping, Stopped, Running without SSM.
+- Start, stop and reboot instances from the toolbar, the Server menu or the right-click menu, with confirmation
+  and live status tracking. Double-clicking a stopped server offers to start it and connects when it's ready.
+- Filters: search, Windows only, Hide offline. Movable and hideable columns.
 
-## Shipping it without installs
-On a PC where the helpers are installed and working, run this from the project folder:
+**Saved connections**
+- Plain RDP or SSH connections to any machine, with optional groups, kept on their own tab.
+- Reachability check on each refresh.
+- Import from RDCMan (`.rdg`), Remote Desktop files (`.rdp`), mRemoteNG (`confCons.xml`) and PuTTY saved sessions.
 
-    powershell -ExecutionPolicy Bypass -File .\collect-tools.ps1
+**Sign-in**
+- Microsoft Entra ID sign-in through [aws-azure-login](https://github.com/aws-azure-login/aws-azure-login), or AWS
+  IAM Identity Center (SSO) profiles.
+- Sign-in status with time remaining, optional background renewal ("Keep me signed in"), paused while Windows is
+  locked or asleep.
+- Asks Entra for each profile's own account (`login_hint`), so a separate admin account isn't swapped for the
+  account signed in to Windows.
+- Signs you in automatically when you connect while signed out; optionally signs out of AWS when the app closes,
+  after ending all open sessions.
+- Add and remove AWS profiles from the app.
 
-It copies them into the project's `tools\` folder, one subfolder each, with their licence files:
+**Everything else**
+- RDP passwords saved in Windows Credential Manager (never in files).
+- Light and dark themes, splash screen, settings window, About page with bundled tool versions.
+- Ships as one self-contained `.exe` plus a `tools\` folder: nothing to install on the target PC.
 
-    tools\node\                     node.exe (runs aws-azure-login; npm isn't needed)
-    tools\aws-azure-login\          the package and its node_modules
-    tools\session-manager-plugin\   session-manager-plugin.exe (carries the RDP tunnel)
-    tools\aws-cli\                  AWS CLI v2 (only used by SSO profiles)
-    tools\chromium\                 only with -IncludeChromium; otherwise the sign-in page opens in Microsoft Edge
+## Requirements
 
-The tools stay there: while developing, Switchboard uses them straight from the project folder (nothing is
-copied into bin\ on build). Publishing copies `tools\` next to the .exe with the same layout, and Switchboard
-uses those copies before anything installed on the PC. Re-run the script after updating any of the tools.
+**To run the published app**
+- Windows 10 or 11, x64.
+- The Microsoft Edge WebView2 Runtime, for the SSH terminal only (included with Windows 10/11).
+- The OpenSSH Client, for SSH only (Windows Settings > Apps > Optional features), unless bundled in `tools\openssh\`.
+- Node.js, aws-azure-login, the Session Manager plugin and the AWS CLI are *not* needed if they were bundled
+  into `tools\` (see [Bundling the helper tools](#bundling-the-helper-tools)).
 
-## Settings (File > Settings, Ctrl+,  or the Settings button)
-- **AWS profile**: pick the profile, see whether you're signed in, sign in, run first-time Microsoft sign-in setup,
-  and choose which regions to scan.
-- **RDP credentials**: save passwords in Windows Credential Manager (encrypted with your Windows sign-in;
-  entries named `SwitchboardRM:<user>` in Control Panel > Credential Manager > Windows Credentials) and pick
-  which user every connection signs in as. If that user has no saved password, Remote Desktop asks.
-- **Appearance**: dark mode (also View > Dark mode). Both looks use a purple accent.
-- **About**: version, what's new, links to the log, settings and tools folders and documentation,
-  bundled tool versions, and a button that copies version details for support requests.
+**To build**
+- The [.NET 10 SDK](https://dotnet.microsoft.com/download).
+- Visual Studio 2022+ or VS Code, optional.
 
-## Versions
-The version is set once, in `SwitchboardRM.csproj` (`<Version>1.0.0</Version>`), and shows on the splash,
-Settings > About (also Help > About) and the .exe's Properties > Details. For each release, bump it
-(PATCH 1.0.1 for fixes, MINOR 1.1.0 for new features, MAJOR 2.0.0 for changes that break existing setups)
-and add a section to `CHANGELOG.md`, which the About page shows as "What's new".
+**On the AWS side**
+- Instances with the SSM agent installed and registered (online in Fleet Manager).
+- For SSH to AWS servers: an SSH server on the instance and a key or account to log in with.
+- IAM permissions for the signed-in role:
 
-## Settings file and logs
-- Settings: `%APPDATA%\SwitchboardRM\settings.json` (profile, RDP user, regions, dark mode, list width). Passwords are never in this file.
-- Logs: File > Open log folder (tunnel output and errors go to files there, not on screen).
+| Permission | Used for |
+|---|---|
+| `ec2:DescribeInstances` | the server list |
+| `ssm:DescribeInstanceInformation` | Systems Manager status |
+| `ssm:StartSession` (on the instances and the `AWS-StartPortForwardingSession` document) | connecting |
+| `ssm:TerminateSession` | ending sessions cleanly when a tab or the app closes |
+| `ec2:StartInstances`, `ec2:StopInstances`, `ec2:RebootInstances` | optional: start / stop / reboot |
+
+## Getting started
+
+```powershell
+git clone <this repository>
+cd SwitchboardRM
+
+# optional but recommended: bundle the helper tools from this PC (see below)
+powershell -ExecutionPolicy Bypass -File .\collect-tools.ps1
+
+# build the finished app into .\output
+.\publish.cmd
+```
+
+`output\` then holds everything needed to run it:
+
+```
+output\
+  SwitchboardRM.exe          the app, the AWS SDK and the .NET runtime in one file
+  tools\                     the bundled helpers, if collected
+```
+
+Copy `output\` anywhere and run `SwitchboardRM.exe`. On first start, use **Add profile** (in the profile list,
+Settings, or the AWS menu) to set up an AWS profile, then **Sign in**. Existing profiles in `~/.aws` are picked up
+automatically.
+
+For development, open the folder in Visual Studio or VS Code and run it (`dotnet run`). Debug builds use the tools
+straight from the project's `tools\` folder.
+
+## Bundling the helper tools
+
+`collect-tools.ps1` copies the helpers installed on the current PC into `tools\`, one subfolder each, with their
+licence files. Publishing mirrors `tools\` into `output\tools\`, and the app uses those copies before anything
+installed on the PC.
+
+| Folder | Contents | Needed for |
+|---|---|---|
+| `tools\node\` | `node.exe` | running aws-azure-login |
+| `tools\aws-azure-login\` | the npm package and its `node_modules` | Microsoft Entra sign-in |
+| `tools\session-manager-plugin\` | `session-manager-plugin.exe` | every AWS connection |
+| `tools\aws-cli\` | AWS CLI v2 | SSO profiles only |
+| `tools\chromium\` | Chromium, with `-IncludeChromium` | optional browser for the sign-in page |
+| `tools\openssh\` | an OpenSSH build, added by hand | optional; otherwise Windows' OpenSSH is used |
+
+Run the script on a PC where Node.js (`npm install -g aws-azure-login`), the Session Manager plugin and the AWS CLI
+are installed and working, and re-run it after updating any of them.
+
+## Usage notes
+
+- **Profile list** (toolbar): the AWS profile to use. "Add profile ..." at the bottom sets up a new one.
+- **Sign in** gets AWS access through the Microsoft sign-in page; the status next to it shows the time left.
+- **Keep me signed in** (toolbar checkbox): checks the sign-in every few minutes and renews it in the background.
+  Off: nothing runs in the background, and you're signed in when you connect.
+- **Double-click** a server to connect. Close tabs with ×, middle-click or right-click.
+- **Ctrl+1 / Ctrl+2** switch between the AWS servers and Saved tabs; **Ctrl+L** hides the server list; **F5**
+  refreshes; **Ctrl+,** opens Settings.
+- In SSH tabs: select text (or Ctrl+Shift+C) to copy, Ctrl+V or right-click to paste, Enter to reconnect after a
+  session ends.
+
+## Data and security
+
+| What | Where |
+|---|---|
+| Settings | `%APPDATA%\SwitchboardRM\settings.json` |
+| Saved connections | `%APPDATA%\SwitchboardRM\connections.json` |
+| RDP passwords | Windows Credential Manager, `SwitchboardRM:<user>` (encrypted with your Windows sign-in) |
+| AWS profiles and temporary keys | `~/.aws/config` and `~/.aws/credentials`, as used by the AWS CLI |
+| Logs | `%LOCALAPPDATA%\SwitchboardRM\logs` (File > Open log folder) |
+
+- No passwords, keys or account details are stored in the repository or in the app's own files.
+- AWS sessions go through Session Manager: access is controlled by IAM, and nothing needs to be exposed to the
+  internet. SSH through the tunnel is end-to-end encrypted, so Session Manager logging records that a session
+  happened but not its contents.
+- Direct (saved) RDP connections verify the server certificate and warn if it can't be verified, like `mstsc`.
+- Removing a profile backs up `~/.aws/config` and `~/.aws/credentials` first (`*.switchboard-backup`).
+
+## How it works
+
+| Part | Files |
+|---|---|
+| Main window, list, tabs, connect flow | `MainForm.cs` |
+| AWS SDK calls, inventory, Session Manager tunnel, profiles | `AwsServices.cs` |
+| Remote Desktop (ActiveX MsRdpClient) host | `RdpHost.cs` |
+| SSH terminal: WebView2 + xterm.js, ConPTY | `TerminalHost.cs`, `PseudoConsole.cs`, `Assets\terminal\` |
+| Saved connections and import | `Connections.cs`, `ConnectionImport.cs` |
+| Sign-in helpers (aws-azure-login, SSO, login hint) | `SignInSetup.cs`, `ProfileSetup.cs`, `Tools.cs`, `Assets\login-hint-shim.js` |
+| Settings, theme, splash | `SettingsForm.cs`, `Theme.cs`, `SplashForm.cs` |
+| Credential Manager | `CredentialStore.cs` |
+
+The app starts sessions with the AWS SDK for .NET and hands the stream to Amazon's `session-manager-plugin`, which
+forwards a local port to 3389 or 22 on the instance. Remote Desktop connects to that port with the built-in RDP
+ActiveX control; SSH runs `ssh.exe` against it inside a Windows pseudo-console.
+
+## Versioning
+
+Versions follow MAJOR.MINOR.PATCH: PATCH for fixes, MINOR for new features or behaviour changes, MAJOR for changes
+that break existing setups. The version is set in `SwitchboardRM.csproj`, and every release has an entry in
+[CHANGELOG.md](CHANGELOG.md), which the app shows under Help > About > What's new.
+
+## Third-party components
+
+| Component | Licence | Use |
+|---|---|---|
+| [AWS SDK for .NET](https://github.com/aws/aws-sdk-net) | Apache 2.0 | AWS calls (NuGet) |
+| [Microsoft.Web.WebView2](https://www.nuget.org/packages/Microsoft.Web.WebView2) | see package | SSH terminal host (NuGet) |
+| [xterm.js](https://github.com/xtermjs/xterm.js) 5.5.0 + fit add-on 0.10.0 | MIT | SSH terminal (in `Assets\terminal\`) |
+| [aws-azure-login](https://github.com/aws-azure-login/aws-azure-login) | MIT | Entra sign-in (bundled by `collect-tools.ps1`) |
+| [Node.js](https://nodejs.org) | MIT | runs aws-azure-login (bundled) |
+| [Session Manager plugin](https://github.com/aws/session-manager-plugin) | Apache 2.0 | tunnels (bundled) |
+| [AWS CLI v2](https://github.com/aws/aws-cli) | Apache 2.0 | SSO sign-in (bundled) |
+
+The bundled tools' licence files are copied into `tools\` alongside them.
+
+## License
+
+Copyright © 2026 Nick Morrissey.
+<!-- Choose a licence (e.g. MIT or Apache 2.0) and add a LICENSE file before publishing. -->
