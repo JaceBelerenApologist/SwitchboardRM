@@ -1,0 +1,15 @@
+# Normalise line endings in the repository; check out with each platform's usual endings.
+* text=auto
+
+# Windows scripts need CRLF to run reliably, whatever platform they're checked out on.
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+*.ps1  text eol=crlf
+
+# Never touch binary files.
+*.png  binary
+*.ico  binary
+*.jpg  binary
+*.zip  binary
+*.dll  binary
+*.exe  binary

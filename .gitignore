@@ -1,0 +1,35 @@
+# Switchboard Remote Manager
+
+# Build output
+bin/
+obj/
+/output/
+
+# Bundled helper tools: collected per machine by collect-tools.ps1 and shipped in release downloads, not in the repo
+# (several hundred MB, mostly node_modules)
+/tools/
+
+# Release zips made from output\
+SwitchboardRM-*.zip
+
+# Visual Studio / Rider / VS Code user state
+.vs/
+*.user
+*.suo
+*.rsuser
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# NuGet
+*.nupkg
+packages/
+
+# Logs and OS clutter
+*.log
+Thumbs.db
+desktop.ini
+.DS_Store
