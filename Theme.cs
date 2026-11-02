@@ -28,51 +28,189 @@ internal sealed class Palette
 
     private static Color Hex(string s) => ColorTranslator.FromHtml(s);
 
-    public static readonly Palette Light = new()
-    {
-        IsDark = false,
-        Back = Hex("#F0F0F2"),
-        Surface = Hex("#FFFFFF"),
-        Raised = Hex("#F7F7F9"),
-        Border = Hex("#D6D6DD"),
-        Text = Hex("#1B1B1F"),
-        Muted = Hex("#7A7A86"),
-        Hover = Hex("#EDE6FD"),
-        Accent = Hex("#7C3AED"),
-        AccentFore = Hex("#6D28D9"),
-        AccentHover = Hex("#6D28D9"),
-        AccentText = Color.White,
-        Good = Hex("#15803D"),
-        Warn = Hex("#B45309"),
-        Bad = Hex("#B91C1C"),
-    };
+    /// <summary>The original purple. With it, the palettes are exactly the hand-tuned ones below.</summary>
+    public static readonly Color DefaultAccent = Hex("#7C3AED");
 
-    public static readonly Palette Dark = new()
+    private static readonly Color LightBack = Hex("#F0F0F2"), DarkBack = Hex("#1C1C21");
+
+    /// <summary>The look for light or dark mode with the given accent colour.</summary>
+    public static Palette Create(bool dark, Color accent)
     {
-        IsDark = true,
-        Back = Hex("#1C1C21"),
-        Surface = Hex("#232329"),
-        Raised = Hex("#2A2A31"),
-        Border = Hex("#3A3A44"),
-        Text = Hex("#E7E7EC"),
-        Muted = Hex("#8E8E9B"),
-        Hover = Hex("#3B2F5C"),
-        Accent = Hex("#8B5CF6"),
-        AccentFore = Hex("#B79CFF"),
-        AccentHover = Hex("#7A4AEF"),
-        AccentText = Color.White,
-        Good = Hex("#4ADE80"),
-        Warn = Hex("#FBBF24"),
-        Bad = Hex("#F87171"),
-    };
+        accent = Color.FromArgb(255, accent);
+        bool purple = accent.ToArgb() == DefaultAccent.ToArgb();
+        if (!dark)
+        {
+            return new Palette
+            {
+                IsDark = false,
+                Back = LightBack, Surface = Hex("#FFFFFF"), Raised = Hex("#F7F7F9"), Border = Hex("#D6D6DD"),
+                Text = Hex("#1B1B1F"), Muted = Hex("#7A7A86"),
+                Accent = accent,
+                Hover = purple ? Hex("#EDE6FD") : ColorMath.Mix(accent, Color.White, 0.86),
+                AccentFore = purple ? Hex("#6D28D9") : ColorMath.Readable(accent, Color.White, towardsLight: false),
+                AccentHover = purple ? Hex("#6D28D9") : ColorMath.Mix(accent, Color.Black, 0.14),
+                AccentText = ColorMath.TextOn(accent),
+                Good = Hex("#15803D"), Warn = Hex("#B45309"), Bad = Hex("#B91C1C"),
+            };
+        }
+        // dark mode: a very dark accent is lifted a little so it still stands out on the dark background
+        var fill = purple ? Hex("#8B5CF6") : ColorMath.Luminance(accent) < 0.12 ? ColorMath.Mix(accent, Color.White, 0.22) : accent;
+        return new Palette
+        {
+            IsDark = true,
+            Back = DarkBack, Surface = Hex("#232329"), Raised = Hex("#2A2A31"), Border = Hex("#3A3A44"),
+            Text = Hex("#E7E7EC"), Muted = Hex("#8E8E9B"),
+            Accent = fill,
+            Hover = purple ? Hex("#3B2F5C") : ColorMath.Mix(fill, DarkBack, 0.72),
+            AccentFore = purple ? Hex("#B79CFF") : ColorMath.Readable(fill, DarkBack, towardsLight: true),
+            AccentHover = purple ? Hex("#7A4AEF") : ColorMath.Mix(fill, Color.Black, 0.12),
+            AccentText = ColorMath.TextOn(fill),
+            Good = Hex("#4ADE80"), Warn = Hex("#FBBF24"), Bad = Hex("#F87171"),
+        };
+    }
+
+    public static readonly Palette Light = Create(false, DefaultAccent);
+    public static readonly Palette Dark = Create(true, DefaultAccent);
+}
+
+/// <summary>Colour helpers for deriving an accent's shades with readable contrast (WCAG formulas).</summary>
+internal static class ColorMath
+{
+    public static Color Mix(Color a, Color b, double towardsB)
+    {
+        double t = Math.Clamp(towardsB, 0, 1);
+        return Color.FromArgb(255,
+            (int)Math.Round(a.R + (b.R - a.R) * t),
+            (int)Math.Round(a.G + (b.G - a.G) * t),
+            (int)Math.Round(a.B + (b.B - a.B) * t));
+    }
+
+    public static double Luminance(Color c)
+    {
+        static double Ch(int v) { double s = v / 255.0; return s <= 0.03928 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4); }
+        return 0.2126 * Ch(c.R) + 0.7152 * Ch(c.G) + 0.0722 * Ch(c.B);
+    }
+
+    public static double Contrast(Color a, Color b)
+    {
+        double la = Luminance(a), lb = Luminance(b);
+        return (Math.Max(la, lb) + 0.05) / (Math.Min(la, lb) + 0.05);
+    }
+
+    /// <summary>The accent, darkened (or lightened) step by step until it reads as text on the background (4.5:1).</summary>
+    public static Color Readable(Color accent, Color background, bool towardsLight)
+    {
+        var c = accent;
+        for (int i = 0; i < 12 && Contrast(c, background) < 4.5; i++)
+            c = Mix(c, towardsLight ? Color.White : Color.Black, 0.14);
+        return c;
+    }
+
+    /// <summary>White or near-black, whichever is easier to read on the colour (e.g. dark text on amber).</summary>
+    public static Color TextOn(Color fill) =>
+        Contrast(Color.White, fill) >= Contrast(Color.FromArgb(17, 17, 20), fill) ? Color.White : Color.FromArgb(17, 17, 20);
+
+    public static string Hex(Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
 }
 
 internal static class Theme
 {
     public static Palette Current { get; private set; } = Palette.Light;
 
+    // ---- customisation (Settings > Appearance), set from the settings by Configure()
+    public static Color Accent { get; private set; } = Palette.DefaultAccent;
+    public const string DefaultUiFont = "Segoe UI";
+    public static string UiFont { get; private set; } = DefaultUiFont;
+    public const string DefaultTerminalFont = "Cascadia Mono";
+    public static string TerminalFont { get; private set; } = DefaultTerminalFont;
+    public static int TerminalFontSize { get; private set; } = 14;
+
+    /// <summary>Accent presets, in the order Settings shows them. The first is the default.</summary>
+    public static readonly (string Name, Color Color)[] AccentPresets =
+    {
+        ("Purple", Palette.DefaultAccent),
+        ("Blue", ColorTranslator.FromHtml("#2563EB")),
+        ("Teal", ColorTranslator.FromHtml("#0D9488")),
+        ("Green", ColorTranslator.FromHtml("#16A34A")),
+        ("Amber", ColorTranslator.FromHtml("#D97706")),
+        ("Red", ColorTranslator.FromHtml("#DC2626")),
+        ("Pink", ColorTranslator.FromHtml("#DB2777")),
+        ("Graphite", ColorTranslator.FromHtml("#475569")),
+    };
+
+    /// <summary>Take the accent and fonts from the settings ("" = default, "#RRGGBB", or "Windows").</summary>
+    public static void Configure(AppSettings s)
+    {
+        Accent = ResolveAccent(s.AccentColor);
+        UiFont = string.IsNullOrWhiteSpace(s.UiFont) ? DefaultUiFont : s.UiFont.Trim();
+        TerminalFont = string.IsNullOrWhiteSpace(s.TerminalFont) ? DefaultTerminalFont : s.TerminalFont.Trim();
+        TerminalFontSize = s.TerminalFontSize is >= 8 and <= 32 ? s.TerminalFontSize : 14;
+    }
+
+    public static Color ResolveAccent(string setting)
+    {
+        if (string.Equals(setting, "Windows", StringComparison.OrdinalIgnoreCase)) return WindowsAccent() ?? Palette.DefaultAccent;
+        if (!string.IsNullOrWhiteSpace(setting))
+        {
+            try { return Color.FromArgb(255, ColorTranslator.FromHtml(setting.Trim())); } catch { }
+        }
+        return Palette.DefaultAccent;
+    }
+
+    /// <summary>Windows' "apps" light/dark setting (Settings > Personalisation > Colours).</summary>
+    public static bool WindowsIsDark()
+    {
+        try
+        {
+            using var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            return k?.GetValue("AppsUseLightTheme") is int v && v == 0;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>The Windows accent colour, or null if it can't be read.</summary>
+    public static Color? WindowsAccent()
+    {
+        try
+        {
+            using var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\DWM");
+            if (k?.GetValue("AccentColor") is int abgr) // 0xAABBGGRR
+                return Color.FromArgb(255, abgr & 0xFF, (abgr >> 8) & 0xFF, (abgr >> 16) & 0xFF);
+            if (k?.GetValue("ColorizationColor") is int argb) // 0xAARRGGBB
+                return Color.FromArgb(255, Color.FromArgb(argb));
+        }
+        catch { }
+        return null;
+    }
+
+    // ---- app font: every control or item using Segoe UI is switched to the chosen family (sizes kept)
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object, Font> _originalFonts = new();
+
+    /// <summary>The font to use for something whose font was originally <paramref name="current"/>.</summary>
+    private static Font UiFontFor(object owner, Font current)
+    {
+        if (current == null) return null;
+        var original = _originalFonts.GetValue(owner, _ => current);
+        string family = original.FontFamily.Name;
+        // only the app's own text font; icon fonts (Segoe MDL2 / Fluent Icons) and monospace fonts stay as they are
+        if (!family.StartsWith("Segoe UI", StringComparison.OrdinalIgnoreCase)) return current;
+        if (UiFont == DefaultUiFont) return original;
+        var style = original.Style;
+        if (family.Contains("Semibold", StringComparison.OrdinalIgnoreCase) || family.Contains("Bold", StringComparison.OrdinalIgnoreCase))
+            style |= FontStyle.Bold; // other families have no separate "Semibold": use bold
+        return new Font(UiFont, original.Size, style, original.Unit);
+    }
+
+    /// <summary>Apply the app font to a control created after the theme was applied.</summary>
+    public static void ApplyFont(Control c)
+    {
+        if (c is AxHost) return;
+        var f = UiFontFor(c, c.Font);
+        if (f != null && !ReferenceEquals(f, c.Font)) c.Font = f;
+    }
+
     /// <summary>Pick the palette without styling a window (used by the splash, which paints itself).</summary>
-    public static void Use(bool dark) => Current = dark ? Palette.Dark : Palette.Light;
+    public static void Use(bool dark) => Current = Palette.Create(dark, Accent);
 
     /// <summary>Rounded corners on a borderless window (Windows 11; ignored on 10).</summary>
     public static void RoundCorners(Form f)
@@ -89,7 +227,7 @@ internal static class Theme
     /// <summary>Switch the whole window (plus any menus that aren't in its control tree) to light or dark.</summary>
     public static void Apply(Form form, bool dark, params ToolStrip[] extraStrips)
     {
-        Current = dark ? Palette.Dark : Palette.Light;
+        Current = Palette.Create(dark, Accent);
         var renderer = new ThemedRenderer(Current);
 
         form.SuspendLayout();
@@ -106,6 +244,7 @@ internal static class Theme
     private static void ApplyTo(Control c, ThemedRenderer renderer)
     {
         var p = Current;
+        if (c is not AxHost) ApplyFont(c);
         switch (c)
         {
             case AxHost:
@@ -183,6 +322,8 @@ internal static class Theme
 
     private static void ApplyStrip(ToolStrip s, ThemedRenderer renderer)
     {
+        var stripFont = UiFontFor(s, s.Font);
+        if (stripFont != null && !ReferenceEquals(stripFont, s.Font)) s.Font = stripFont;
         s.Renderer = renderer;
         s.BackColor = s is ToolStripDropDown ? Current.Surface : Current.Raised;
         s.ForeColor = Current.Text;
@@ -193,6 +334,8 @@ internal static class Theme
     private static void ApplyItem(ToolStripItem item, ThemedRenderer renderer)
     {
         var p = Current;
+        var itemFont = UiFontFor(item, item.Font);
+        if (itemFont != null && !ReferenceEquals(itemFont, item.Font)) item.Font = itemFont;
         item.ForeColor = p.Text;
         switch (item)
         {
@@ -294,6 +437,9 @@ internal static class Icons
     public const string Reboot = "\uE895";   // two arrows in a circle
     public const string Settings = "\uE713"; // gear
     public const string Add = "\uE710";      // plus
+    public const string SignIn = "\uE77B";   // person
+    public const string SignOut = "\uE7E8";  // power
+    public const string Terminal = "\uE756"; // command prompt
 
     /// <summary>A glyph drawn into a transparent square bitmap, for ToolStrip items that show an icon and text.</summary>
     public static Bitmap Render(string glyph, Color color, int px)
@@ -491,10 +637,26 @@ internal sealed class ThemedTabControl : TabControl
 {
     /// <summary>Raised when the × on a tab is clicked.</summary>
     public event Action<TabPage> CloseRequested;
+    /// <summary>Raised when the + after the last tab is clicked (screen point to show a menu at).</summary>
+    public event Action<Point> NewTabRequested;
+
+    /// <summary>Tag for tab pages that hold a local shell: they get a terminal icon before their name.</summary>
+    public const string ShellTag = "shell";
+    /// <summary>Put this in front of a shell tab's text, to make room for its icon.</summary>
+    public const string IconSpace = "      ";
 
     private const int CloseSize = 16;
+    private const int PlusSize = 22;
     private const int WM_LBUTTONDOWN = 0x0201;
     private int _hoverClose = -1;
+    private bool _hoverPlus;
+
+    private Rectangle PlusRect()
+    {
+        if (TabCount == 0) return Rectangle.Empty;
+        var last = GetTabRect(TabCount - 1);
+        return new Rectangle(last.Right + 6, last.Top + (last.Height - PlusSize) / 2 + 1, PlusSize, PlusSize);
+    }
 
     public ThemedTabControl()
     {
@@ -530,6 +692,13 @@ internal sealed class ThemedTabControl : TabControl
                 BeginInvoke(() => CloseRequested?.Invoke(page));
                 return;
             }
+            var plus = PlusRect();
+            if (plus.Contains(pt))
+            {
+                var screen = PointToScreen(new Point(plus.Left, plus.Bottom));
+                BeginInvoke(() => NewTabRequested?.Invoke(screen));
+                return;
+            }
         }
         base.WndProc(ref m);
     }
@@ -538,13 +707,14 @@ internal sealed class ThemedTabControl : TabControl
     {
         base.OnMouseMove(e);
         int h = CloseHit(e.Location);
-        if (h != _hoverClose) { _hoverClose = h; Invalidate(); }
+        bool plus = PlusRect().Contains(e.Location);
+        if (h != _hoverClose || plus != _hoverPlus) { _hoverClose = h; _hoverPlus = plus; Invalidate(); }
     }
 
     protected override void OnMouseLeave(EventArgs e)
     {
         base.OnMouseLeave(e);
-        if (_hoverClose != -1) { _hoverClose = -1; Invalidate(); }
+        if (_hoverClose != -1 || _hoverPlus) { _hoverClose = -1; _hoverPlus = false; Invalidate(); }
     }
 
     protected override void OnControlRemoved(ControlEventArgs e)
@@ -590,10 +760,38 @@ internal sealed class ThemedTabControl : TabControl
                 g.DrawLine(border, r.Right - 1, r.Top + 6, r.Right - 1, r.Bottom - 6);
             }
             var textRect = new Rectangle(r.Left + 12, r.Top, r.Width - 12 - CloseSize - 12, r.Height);
-            TextRenderer.DrawText(g, TabPages[i].Text, Font, textRect, sel ? p.Text : p.Muted,
+            string text = TabPages[i].Text;
+            if (Equals(TabPages[i].Tag, ShellTag))
+            {
+                // terminal icon in the space IconSpace made, then the name
+                var iconRect = new Rectangle(textRect.Left, textRect.Top, 18, textRect.Height);
+                TextRenderer.DrawText(g, Icons.Terminal, Icons.Font, iconRect, sel ? p.AccentFore : p.Muted,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                text = text.TrimStart();
+                textRect = new Rectangle(textRect.Left + 22, textRect.Top, Math.Max(0, textRect.Width - 22), textRect.Height);
+            }
+            TextRenderer.DrawText(g, text, Font, textRect, sel ? p.Text : p.Muted,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
                 TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
             DrawClose(g, CloseRect(i), sel, i == _hoverClose, p);
+        }
+
+        // + after the last tab: a new local shell
+        var plusRect = PlusRect();
+        if (!plusRect.IsEmpty)
+        {
+            var oldMode = g.SmoothingMode;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            if (_hoverPlus)
+            {
+                using var hb = new SolidBrush(p.Hover);
+                g.FillEllipse(hb, plusRect);
+            }
+            using var pen = new Pen(_hoverPlus ? p.AccentFore : p.Muted, 1.8f);
+            int cx = plusRect.Left + plusRect.Width / 2, cy = plusRect.Top + plusRect.Height / 2, arm = 5;
+            g.DrawLine(pen, cx - arm, cy, cx + arm, cy);
+            g.DrawLine(pen, cx, cy - arm, cx, cy + arm);
+            g.SmoothingMode = oldMode;
         }
 
         // line under the strip, open under the active tab so it reads as attached to its page

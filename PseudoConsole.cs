@@ -27,16 +27,19 @@ internal sealed class PseudoConsole : IDisposable
 
     /// <param name="onOutput">Screen output, on a background thread.</param>
     /// <param name="onExit">The program's exit code once it ends, on a background thread.</param>
-    public static PseudoConsole Start(string commandLine, int cols, int rows, Action<string> onOutput, Action<int> onExit)
+    /// <param name="workingDirectory">Folder to start in (null = the app's current folder).</param>
+    /// <param name="environment">Variables to set or replace for the program (null = the app's own environment).</param>
+    public static PseudoConsole Start(string commandLine, int cols, int rows, Action<string> onOutput, Action<int> onExit,
+        string workingDirectory = null, IDictionary<string, string> environment = null)
     {
         // handlers are in place before anything is read, so the first bytes (e.g. a password prompt) aren't lost
         var pc = new PseudoConsole { _onOutput = onOutput, _onExit = onExit };
-        try { pc.StartCore(commandLine, cols, rows); }
+        try { pc.StartCore(commandLine, cols, rows, workingDirectory, environment); }
         catch { pc.Dispose(); throw; }
         return pc;
     }
 
-    private void StartCore(string commandLine, int cols, int rows)
+    private void StartCore(string commandLine, int cols, int rows, string workingDirectory, IDictionary<string, string> environment)
     {
         // two pipes: what we write -> the program's keyboard; the program's screen -> what we read
         if (!CreatePipe(out var inRead, out var inWrite, IntPtr.Zero, 0)) throw new Win32Exception();
@@ -59,12 +62,22 @@ internal sealed class PseudoConsole : IDisposable
             var si = new STARTUPINFOEX();
             si.StartupInfo.cb = Marshal.SizeOf<STARTUPINFOEX>();
             si.lpAttributeList = attrs;
-            // CreateProcessW may write into the command-line buffer, so it gets its own copy
-            if (!CreateProcess(null, new StringBuilder(commandLine), IntPtr.Zero, IntPtr.Zero, false, EXTENDED_STARTUPINFO_PRESENT,
-                    IntPtr.Zero, null, ref si, out var pi))
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Couldn't start: " + commandLine);
-            _process = pi.hProcess;
-            _thread = pi.hThread;
+            IntPtr envBlock = environment == null ? IntPtr.Zero : Marshal.StringToHGlobalUni(EnvironmentBlock(environment));
+            try
+            {
+                uint flags = EXTENDED_STARTUPINFO_PRESENT | (envBlock != IntPtr.Zero ? CREATE_UNICODE_ENVIRONMENT : 0);
+                string cwd = !string.IsNullOrEmpty(workingDirectory) && Directory.Exists(workingDirectory) ? workingDirectory : null;
+                // CreateProcessW may write into the command-line buffer, so it gets its own copy
+                if (!CreateProcess(null, new StringBuilder(commandLine), IntPtr.Zero, IntPtr.Zero, false, flags,
+                        envBlock, cwd, ref si, out var pi))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Couldn't start: " + commandLine);
+                _process = pi.hProcess;
+                _thread = pi.hThread;
+            }
+            finally
+            {
+                if (envBlock != IntPtr.Zero) Marshal.FreeHGlobal(envBlock);
+            }
         }
         finally
         {
@@ -144,12 +157,26 @@ internal sealed class PseudoConsole : IDisposable
         // the wait thread may still be using the process handle; leave the two handles to process exit
     }
 
+    /// <summary>The app's environment with the given changes, as Windows expects it: "NAME=value\0...\0", sorted.</summary>
+    private static string EnvironmentBlock(IDictionary<string, string> changes)
+    {
+        var vars = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (System.Collections.DictionaryEntry e in Environment.GetEnvironmentVariables())
+            vars[(string)e.Key] = (string)e.Value;
+        foreach (var kv in changes) vars[kv.Key] = kv.Value;
+        var sb = new StringBuilder();
+        foreach (var kv in vars) sb.Append(kv.Key).Append('=').Append(kv.Value).Append('\0');
+        sb.Append('\0');
+        return sb.ToString();
+    }
+
     private static COORD Size(int cols, int rows) =>
         new() { X = (short)Math.Clamp(cols, 1, short.MaxValue), Y = (short)Math.Clamp(rows, 1, short.MaxValue) };
 
     // ---------------------------------------------------------------- Win32
 
     private const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
+    private const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
     private const int PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016;
     private const uint INFINITE = 0xFFFFFFFF;
 

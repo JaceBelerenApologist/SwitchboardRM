@@ -105,7 +105,31 @@ internal sealed class AppSettings
     public string Username { get; set; } = "";
     public List<string> ScanRegions { get; set; } = new() { "ca-central-1", "ca-west-1" };
     public bool WindowsOnly { get; set; } = true;
-    public bool DarkMode { get; set; }
+    public bool DarkMode { get; set; }   // from before ThemeMode; still kept in step for older versions
+
+    // ---- appearance (Settings > Appearance)
+    /// <summary>"Light", "Dark" or "System" (follow Windows). Empty = settings from before 2.6: use DarkMode.</summary>
+    public string ThemeMode { get; set; } = "";
+    /// <summary>"" = the default purple, "#RRGGBB" = a chosen colour, "Windows" = follow the Windows accent colour.</summary>
+    public string AccentColor { get; set; } = "";
+    /// <summary>Font family for the app's text. Empty = Segoe UI.</summary>
+    public string UiFont { get; set; } = "";
+    public float ListFontSize { get; set; } = 10;
+    /// <summary>Font family for SSH terminals. Empty = Cascadia Mono.</summary>
+    public string TerminalFont { get; set; } = "";
+    public int TerminalFontSize { get; set; } = 14;
+    /// <summary>Shell for Ctrl+T and the toolbar's terminal button: "cmd", "powershell", "pwsh", ... Empty = automatic.</summary>
+    public string DefaultShell { get; set; } = "";
+
+    /// <summary>Whether to show the dark look right now (ThemeMode, or Windows' setting for "System").</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool EffectiveDark => ThemeMode switch
+    {
+        "Dark" => true,
+        "Light" => false,
+        "System" => Theme.WindowsIsDark(),
+        _ => DarkMode,
+    };
     public int ListWidth { get; set; } = 760;
     /// <summary>Check the AWS sign-in in the background and renew it before it runs out.</summary>
     public bool KeepSignedIn { get; set; } = true;
@@ -134,15 +158,34 @@ internal sealed class AppSettings
     /// Just the dark-mode setting, read with a plain text search so the splash can appear before
     /// the JSON library has loaded. Load() still reads the whole file properly afterwards.
     /// </summary>
-    public static bool PeekDarkMode()
+    public static bool PeekDarkMode() => PeekAppearance().Dark;
+
+    /// <summary>
+    /// Light/dark and the accent colour, read with a plain text search so the splash can use them before the JSON
+    /// library has loaded. Load() still reads the whole file properly afterwards.
+    /// </summary>
+    public static (bool Dark, string Accent) PeekAppearance()
     {
         try
         {
-            if (!File.Exists(FilePath)) return false;
+            if (!File.Exists(FilePath)) return (false, "");
             string compact = string.Concat(File.ReadAllText(FilePath).Where(c => !char.IsWhiteSpace(c)));
-            return compact.Contains("\"DarkMode\":true", StringComparison.OrdinalIgnoreCase);
+            static string Str(string json, string key)
+            {
+                string marker = "\"" + key + "\":\"";
+                int i = json.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+                if (i < 0) return "";
+                int start = i + marker.Length, end = json.IndexOf('"', start);
+                return end > start ? json[start..end] : "";
+            }
+            string mode = Str(compact, "ThemeMode");
+            bool dark = mode.Equals("Dark", StringComparison.OrdinalIgnoreCase) ? true
+                : mode.Equals("Light", StringComparison.OrdinalIgnoreCase) ? false
+                : mode.Equals("System", StringComparison.OrdinalIgnoreCase) ? Theme.WindowsIsDark()
+                : compact.Contains("\"DarkMode\":true", StringComparison.OrdinalIgnoreCase);
+            return (dark, Str(compact, "AccentColor"));
         }
-        catch { return false; }
+        catch { return (false, ""); }
     }
 
     public static AppSettings Load()

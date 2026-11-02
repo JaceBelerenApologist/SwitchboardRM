@@ -31,6 +31,9 @@ ordinary RDP and SSH connections (or imports them from RDCMan, mRemoteNG, `.rdp`
   instance ID, so the tunnel's changing local port never triggers host-key warnings.
 - Linux servers default to SSH and Windows servers to RDP; Server > Connect with SSH / Remote Desktop overrides it.
 
+- Local shells in tabs too: Command Prompt, Windows PowerShell, PowerShell 7, Git Bash and WSL (when installed),
+  with `AWS_PROFILE` and the bundled AWS tools already set up.
+
 **AWS servers**
 - Lists every EC2 instance (except terminated ones) and anything else Systems Manager manages, across chosen regions.
 - Live status: Online, Agent offline, Starting, Stopping, Stopped, Running without SSM.
@@ -56,7 +59,9 @@ ordinary RDP and SSH connections (or imports them from RDCMan, mRemoteNG, `.rdp`
 
 **Everything else**
 - RDP passwords saved in Windows Credential Manager (never in files).
-- Light and dark themes, splash screen, settings window, About page with bundled tool versions.
+- Customisable look: light, dark or match Windows; any accent colour (presets, the Windows accent or a custom
+  colour); app font, server list text size, and terminal font and size.
+- Splash screen, settings window, About page with bundled tool versions.
 - Ships as one self-contained `.exe` plus a `tools\` folder: nothing to install on the target PC.
 
 ## Requirements
@@ -148,10 +153,13 @@ When the setup window is done, click **Sign in**.
 ## Usage notes
 
 - **Profile list** (toolbar): the AWS profile to use. "Add profile ..." at the bottom sets up a new one.
-- **Sign in** gets AWS access through the Microsoft sign-in page; the status next to it shows the time left.
+- **Sign in** gets AWS access through the Microsoft sign-in page; **Sign out** removes it again (open tabs keep
+  running). The status next to them shows the time left.
 - **Keep me signed in** (toolbar checkbox): checks the sign-in every few minutes and renews it in the background.
   Off: nothing runs in the background, and you're signed in when you connect.
 - **Double-click** a server to connect. Close tabs with ×, middle-click or right-click.
+- **Ctrl+T** (or the terminal button, or the + after the last tab) opens a local shell; Settings > Terminal & SSH
+  sets which one.
 - **Ctrl+1 / Ctrl+2** switch between the AWS servers and Saved tabs; **Ctrl+L** hides the server list; **F5**
   refreshes; **Ctrl+,** opens Settings.
 - In SSH tabs: select text (or Ctrl+Shift+C) to copy, Ctrl+V or right-click to paste, Enter to reconnect after a
@@ -198,19 +206,33 @@ For maintainers who publish the ready-to-run download (Option A).
    Where a tool's installation has no licence file, the script writes a `LICENSE-NOTE.txt` naming the licence and
    where to read it.
 3. Run `.\publish.cmd`. `output\` then holds `SwitchboardRM.exe` and `tools\`.
-4. Zip `output\` as `SwitchboardRM-<version>.zip` and attach it to a GitHub Release tagged `v<version>`, with that
-   version's notes from [CHANGELOG.md](CHANGELOG.md). Don't commit `tools\` or `output\` to the repository.
+4. Commit, tag and push with `git-release.ps1` (it reads the version from the `.csproj`, uses that version's
+   [CHANGELOG.md](CHANGELOG.md) notes, and prints the link for the release):
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\git-release.ps1     # -DryRun to preview, -Version X.Y.Z to choose
+   ```
+5. Zip `output\` as `SwitchboardRM-<version>.zip` and attach it to that GitHub Release. Don't commit `tools\` or
+   `output\` to the repository.
 
 ### Keeping the bundled tools up to date
 
 People who download a release run the tool versions you collected, so refresh them regularly. Node.js and Chromium
 in particular get frequent security fixes.
 
-- **Node.js:** install the newer LTS.
-- **aws-azure-login:** `npm update -g aws-azure-login`
-- **Session Manager plugin, AWS CLI:** install their newer Windows installers.
-- Then re-run `collect-tools.ps1`, publish, and release it as a new PATCH version. Settings > About in the app lists
-  the bundled versions.
+`update-tools.ps1` does the checking and updating for you, then refreshes `tools\`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\update-tools.ps1              # check, update, refresh tools\
+powershell -ExecutionPolicy Bypass -File .\update-tools.ps1 -CheckOnly   # only report what's out of date
+```
+
+It updates Node.js (LTS), the Session Manager plugin and the AWS CLI with winget, and aws-azure-login with npm
+(skipping npm releases less than 7 days old unless you add `-AllowRecent`), then runs `collect-tools.ps1`.
+Publish afterwards and release it as a new PATCH version. Settings > About in the app lists the bundled versions.
+
+To do it by hand instead: install the newer Node.js LTS, run `npm update -g aws-azure-login`, install the newer
+Session Manager plugin and AWS CLI installers, then re-run `collect-tools.ps1`.
 
 ### Licences of the bundled tools
 

@@ -20,8 +20,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #1c1c21; }
   document.body.style.background = theme.background;
 
   const term = new Terminal({
-    fontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
-    fontSize: 14,
+    fontFamily: /*FONT_FAMILY*/,
+    fontSize: /*FONT_SIZE*/,
     cursorBlink: true,
     scrollback: 10000,
     theme: theme,
@@ -63,7 +63,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #1c1c21; }
   host.addEventListener('message', e => {
     const m = e.data;
     if (typeof m === 'string') { term.write(m); return; }
-    if (m.t === 'theme') { term.options.theme = m.theme; document.body.style.background = m.theme.background; }
+    if (m.t === 'theme') {
+      term.options.theme = m.theme;
+      document.body.style.background = m.theme.background;
+      if (m.font) { term.options.fontFamily = m.font.family; term.options.fontSize = m.font.size; refit(); }
+    }
     else if (m.t === 'focus') term.focus();
   });
 

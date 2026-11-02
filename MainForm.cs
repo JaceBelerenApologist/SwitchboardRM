@@ -50,6 +50,8 @@ internal sealed class MainForm : Form
     { Checked = true, ToolTipText = "Show the server list (Ctrl+L). Pressed = shown." };
     private readonly ToolStripButton _btnSignIn = new("Sign in")
     { ToolTipText = "Open the Microsoft sign-in page and get fresh AWS access for this profile (lasts about an hour)" };
+    private readonly ToolStripButton _btnSignOut = new("Sign out")
+    { ToolTipText = "Sign out of AWS now: removes this profile's temporary keys. Open tabs keep running.", Enabled = false };
     private readonly ToolStripButton _btnRefresh = new(Icons.Refresh)
     { ToolTipText = "Reload the server list from AWS (F5). Doesn't sign in again." };
     private readonly ToolStripButton _btnSettings = new(Icons.Settings)
@@ -92,6 +94,11 @@ internal sealed class MainForm : Form
     private List<Instance> _aws = new();
     private readonly Dictionary<string, bool> _reachable = new(); // saved connection id -> port answered
     private readonly ToolStripButton _btnAdd = new(Icons.Add) { ToolTipText = "Add a saved RDP connection (not AWS)" };
+    private readonly ToolStripSplitButton _btnShell = new(Icons.Terminal)
+    { ToolTipText = "New shell on this PC (Ctrl+T). The arrow picks which one." };
+    private readonly ToolStripMenuItem _miNewShell = new("New &shell") { ShortcutKeys = Keys.Control | Keys.T };
+    private readonly ToolStripMenuItem _miShellMenu = new("Open shell");
+    private readonly ContextMenuStrip _shellMenu = new();
     private readonly ToolStripMenuItem _smAdd = new("&Add RDP connection ...");
     private readonly ToolStripMenuItem _smEdit = new("&Edit connection ...");
     private readonly ToolStripMenuItem _smRemove = new("Remo&ve connection ...");
@@ -180,8 +187,10 @@ internal sealed class MainForm : Form
         Font = new Font("Segoe UI", 9F);
 
         if (AppIcon.Icon != null) Icon = AppIcon.Icon;
+        Theme.Configure(_settings);   // accent colour and fonts, before anything is built
+        Shells.StartWslLookup();      // WSL distributions are listed in the background
         BuildUi();
-        _miDark.Checked = _settings.DarkMode;
+        _miDark.Checked = _settings.EffectiveDark;
         _chkKeep.Checked = _settings.KeepSignedIn;
         WireEvents();
 
@@ -199,7 +208,12 @@ internal sealed class MainForm : Form
 
     private void ApplyTheme()
     {
-        Theme.Apply(this, _settings.DarkMode, _listMenu, _tabMenu);
+        Theme.Configure(_settings);
+        Theme.Apply(this, _settings.EffectiveDark, _listMenu, _tabMenu);
+        // server list text size (Settings > Appearance), in the app font
+        float listSize = _settings.ListFontSize is >= 8f and <= 18f ? _settings.ListFontSize : 10;
+        if (_list.Font.Size != listSize || _list.Font.FontFamily.Name != Theme.UiFont)
+            _list.Font = new Font(Theme.UiFont, listSize);
         _hint.ForeColor = Theme.Current.Muted;
         RenderActionIcons();
         foreach (var s in _sessions) s.Term?.ApplyTheme();
@@ -218,9 +232,9 @@ internal sealed class MainForm : Form
     {
         // toolbar
         _tool.GripStyle = ToolStripGripStyle.Hidden;
-        foreach (var b in new[] { _btnList, _btnSignIn, _btnRefresh, _btnCancel, _btnSettings, _btnAuth })
+        foreach (var b in new[] { _btnList, _btnRefresh, _btnCancel, _btnSettings, _btnAuth })
             b.DisplayStyle = ToolStripItemDisplayStyle.Text;
-        foreach (var b in new[] { _btnList, _btnRefresh, _btnSettings, _btnAdd })
+        foreach (var b in new ToolStripItem[] { _btnList, _btnRefresh, _btnSettings, _btnAdd, _btnShell })
         {
             b.Font = Icons.Font;
             b.Padding = new Padding(4, 1, 4, 1);
@@ -228,6 +242,7 @@ internal sealed class MainForm : Form
         }
         _btnList.Margin = new Padding(4, 1, 0, 2);
         _btnSettings.Margin = new Padding(0, 1, 6, 2); // a little breathing room from the window edge
+        _btnShell.DisplayStyle = ToolStripItemDisplayStyle.Text;
         foreach (var b in new[] { _btnConnect, _btnStart, _btnStop, _btnReboot })
         {
             b.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
@@ -235,15 +250,21 @@ internal sealed class MainForm : Form
             b.Padding = new Padding(3, 1, 4, 1);
             b.Enabled = false;                               // until a server is selected
         }
+        foreach (var b in new[] { _btnSignIn, _btnSignOut })   // icon and word, like the server buttons
+        {
+            b.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+            b.ImageScaling = ToolStripItemImageScaling.None;
+            b.Padding = new Padding(3, 1, 4, 1);
+        }
         _cboProfile.ToolTipText = "The AWS profile (from your computer's AWS settings) used to list servers and connect";
         _tool.Items.AddRange(new ToolStripItem[]
         {
-            _btnList, _btnRefresh, _btnAdd,
+            _btnList, _btnRefresh, _btnAdd, _btnShell,
             new ToolStripSeparator { Margin = new Padding(6, 0, 6, 0) },
             _btnConnect, _btnStart, _btnStop, _btnReboot,
             new ToolStripSeparator { Margin = new Padding(14, 0, 14, 0) },  // clear gap between server controls and the profile
             new ToolStripLabel("AWS profile"), _cboProfile,
-            _btnSignIn, _btnAuth, KeepHost(), _btnCancel,
+            _btnSignIn, _btnSignOut, _btnAuth, KeepHost(), _btnCancel,
             _btnSettings,   // right-aligned
         });
 
@@ -251,6 +272,9 @@ internal sealed class MainForm : Form
         var file = new ToolStripMenuItem("&File");
         file.DropDownItems.Add(new ToolStripMenuItem("&Settings...", null, async (_, _) => await OpenSettingsAsync(SettingsForm.Page.Profile))
         { ShortcutKeys = Keys.Control | Keys.Oemcomma, ShortcutKeyDisplayString = "Ctrl+," });
+        file.DropDownItems.Add(_miNewShell);
+        file.DropDownItems.Add(_miShellMenu);
+        file.DropDownItems.Add(new ToolStripSeparator());
         file.DropDownItems.Add(ImportMenu());
         file.DropDownItems.Add(new ToolStripMenuItem("Open &log folder", null, (_, _) => OpenLogs()));
         file.DropDownItems.Add(new ToolStripSeparator());
@@ -429,9 +453,10 @@ internal sealed class MainForm : Form
         _btnList.Click += (_, _) => ToggleList();
         _btnRefresh.Click += async (_, _) => await RefreshAsync();
         _btnSignIn.Click += async (_, _) => await SignInAsync();
+        _btnSignOut.Click += async (_, _) => await SignOutNowAsync();
         _btnSettings.Click += async (_, _) => await OpenSettingsAsync(SettingsForm.Page.Profile);
         _btnAuth.Click += async (_, _) => await OpenSettingsAsync(SettingsForm.Page.Profile);
-        _miDark.Click += (_, _) => SetDarkMode(!_settings.DarkMode);
+        _miDark.Click += (_, _) => SetDarkMode(!_settings.EffectiveDark);
         _miList.Click += (_, _) => ToggleList();
         _miViewAws.Click += (_, _) => SetView(false);
         _miViewSaved.Click += (_, _) => SetView(true);
@@ -490,6 +515,17 @@ internal sealed class MainForm : Form
         };
 
         _tabs.MouseUp += OnTabMouseUp;
+        // local shells: toolbar button (click = default, arrow = choose), File menu, Ctrl+T, and the tab strip's +
+        _btnShell.ButtonClick += async (_, _) => await OpenShellAsync(Shells.Default(_settings.DefaultShell));
+        _btnShell.DropDownOpening += (_, _) => FillShellMenu(_btnShell.DropDownItems, _btnShell.DropDown);
+        _miNewShell.Click += async (_, _) => await OpenShellAsync(Shells.Default(_settings.DefaultShell));
+        _miShellMenu.DropDownItems.Add("(loading)");   // makes it a submenu; filled when opened
+        _miShellMenu.DropDownOpening += (_, _) => FillShellMenu(_miShellMenu.DropDownItems, _miShellMenu.DropDown);
+        _tabs.NewTabRequested += screen =>
+        {
+            FillShellMenu(_shellMenu.Items, _shellMenu);
+            _shellMenu.Show(screen);
+        };
         _tabs.CloseRequested += page =>
         {
             var s = _sessions.FirstOrDefault(x => x.Page == page);
@@ -552,8 +588,11 @@ internal sealed class MainForm : Form
     protected override async void OnFormClosing(FormClosingEventArgs e)
     {
         if (_closeReady) { base.OnFormClosing(e); return; }
-        if (_sessions.Count > 0 &&
-            !Ask($"{_sessions.Count} remote session(s) are open. Close them and exit?"))
+        int remote = _sessions.Count(x => x.Kind != Protocol.Local), shells = _sessions.Count - remote;
+        string open = remote > 0 && shells > 0 ? $"{remote} remote session(s) and {shells} shell(s) are open"
+                    : remote > 0 ? $"{remote} remote session(s) are open"
+                    : $"{shells} shell(s) are open";
+        if (_sessions.Count > 0 && !Ask($"{open}. Close them and exit?"))
         {
             e.Cancel = true;
             return;
@@ -936,6 +975,83 @@ internal sealed class MainForm : Form
         finally { _opening.Remove(openingKey); }
     }
 
+    // ---------------------------------------------------------------- local shells
+
+    /// <summary>One menu entry per shell on this PC (the default marked), in a toolbar, File or + menu.</summary>
+    private void FillShellMenu(ToolStripItemCollection items, ToolStrip owner)
+    {
+        items.Clear();
+        var def = Shells.Default(_settings.DefaultShell);
+        foreach (var shell in Shells.Available())
+        {
+            var item = new ToolStripMenuItem(shell.Id == def.Id ? shell.Name + "  (default, Ctrl+T)" : shell.Name);
+            var chosen = shell;
+            item.Click += async (_, _) => await OpenShellAsync(chosen);
+            items.Add(item);
+        }
+        Theme.ApplyMenu(owner);
+    }
+
+    /// <summary>Environment for a shell: AWS_PROFILE set to the profile in use, and the bundled tools on PATH.</summary>
+    private Dictionary<string, string> ShellEnvironment()
+    {
+        var env = new Dictionary<string, string>();
+        if (Profile.Length > 0) env["AWS_PROFILE"] = Profile;
+        var toolDirs = new[] { "aws-cli", "session-manager-plugin", "node" }
+            .Select(d => Path.Combine(Tools.Dir, d)).Where(Directory.Exists).ToList();
+        if (toolDirs.Count > 0)
+            env["PATH"] = string.Join(";", toolDirs) + ";" + (Environment.GetEnvironmentVariable("PATH") ?? "");
+        return env;
+    }
+
+    /// <summary>Open a local shell in a new tab, starting in the user folder.</summary>
+    private async Task OpenShellAsync(ShellInfo shell)
+    {
+        // "PowerShell", then "PowerShell 2", "PowerShell 3" ... for more of the same kind
+        var used = new HashSet<string>(_sessions.Where(x => x.Kind == Protocol.Local).Select(x => x.Inst.Name));
+        string name = shell.Name;
+        for (int n = 2; used.Contains(name); n++) name = $"{shell.Name} {n}";
+
+        var inst = new Instance { Name = name, Id = "shell:" + Guid.NewGuid().ToString("N"), Type = shell.Id };
+        var page = new TabPage(ThemedTabControl.IconSpace + name) { BackColor = Theme.Current.Back, Tag = ThemedTabControl.ShellTag };
+        var term = new TerminalHost { Dock = DockStyle.Fill, EndedAction = "restart" };
+        page.Controls.Add(term);
+        _tabs.TabPages.Add(page);
+        _tabs.Visible = true;
+        _hint.Visible = false;
+        _tabs.SelectedTab = page;
+
+        var session = new Session { Inst = inst, Kind = Protocol.Local, Term = term, Page = page };
+        _sessions.Add(session);
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        term.SessionEnded += _ => page.Text = ThemedTabControl.IconSpace + name + " (ended)";
+        term.ReconnectRequested += () =>
+        {
+            page.Text = ThemedTabControl.IconSpace + name;
+            term.Reset();
+            term.Run(shell.CommandLine, home, ShellEnvironment());
+        };
+
+        try
+        {
+            await term.StartAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.Write("Terminal failed to load: " + ex);
+            CloseSession(session);
+            string msg = ex is Microsoft.Web.WebView2.Core.WebView2RuntimeNotFoundException
+                ? "The Microsoft Edge WebView2 Runtime isn't installed, and the terminal needs it.\n\n" +
+                  "It's normally part of Windows 10/11; it can be installed from Microsoft's WebView2 download page."
+                : ex.Message;
+            MessageBox.Show(this, msg, "Could not open the terminal", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        term.Run(shell.CommandLine, home, ShellEnvironment());
+        term.FocusTerminal();
+        SetStatus($"Opened {name}" + (Profile.Length > 0 ? $" (AWS_PROFILE={Profile})" : ""));
+    }
+
     // ---------------------------------------------------------------- SSH
 
     /// <summary>Open an SSH terminal tab: tunnel to port 22 for AWS servers (direct for saved ones), then ssh.exe.</summary>
@@ -1185,6 +1301,7 @@ internal sealed class MainForm : Form
     {
         _busy = busy;
         _btnRefresh.Enabled = _btnSignIn.Enabled = _cboProfile.Enabled = !busy;
+        UpdateSignOutButton();
         _progress.Visible = busy;
         if (busy)
         {
@@ -1218,7 +1335,7 @@ internal sealed class MainForm : Form
         if (OwnedForms.OfType<SettingsForm>().FirstOrDefault() is { } open) { open.Activate(); return; }
 
         bool keepBefore = _settings.KeepSignedIn;
-        using var f = new SettingsForm(_settings, Profile, _cboProfile.Items.Cast<object>().Select(o => o.ToString()).Where(o => o != AddProfileItem), SetDarkMode, page,
+        using var f = new SettingsForm(_settings, Profile, _cboProfile.Items.Cast<object>().Select(o => o.ToString()).Where(o => o != AddProfileItem), ApplyAppearance, page,
             awsSessionsOpen: _sessions.Any(x => x.Tunnel != null));
         f.ShowDialog(this);
         if (_settings.KeepSignedIn != keepBefore) await SetKeepSignedInAsync(_settings.KeepSignedIn);
@@ -1240,13 +1357,37 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>Switch light/dark everywhere: this window, its menus and an open Settings window.</summary>
+    /// <summary>View > Dark mode: an explicit choice of light or dark (leaves "Match Windows").</summary>
     private void SetDarkMode(bool dark)
     {
+        _settings.ThemeMode = dark ? "Dark" : "Light";
         _settings.DarkMode = dark;
+        ApplyAppearance();
+    }
+
+    /// <summary>Save the appearance settings and restyle this window, its menus, terminals and any open Settings window.</summary>
+    private void ApplyAppearance()
+    {
+        _settings.DarkMode = _settings.EffectiveDark; // keeps older versions' setting in step
         _settings.Save();
-        _miDark.Checked = dark;
+        RestyleEverything();
+    }
+
+    private void RestyleEverything()
+    {
+        _miDark.Checked = _settings.EffectiveDark;
         ApplyTheme();
         foreach (var f in OwnedForms.OfType<SettingsForm>()) f.ApplyTheme();
+    }
+
+    /// <summary>Windows' colours or light/dark setting changed: follow them if Appearance says to.</summary>
+    private void OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
+    {
+        if (e.Category is not (UserPreferenceCategory.General or UserPreferenceCategory.Color or UserPreferenceCategory.VisualStyle))
+            return;
+        bool followsWindows = _settings.ThemeMode == "System" ||
+                              string.Equals(_settings.AccentColor, "Windows", StringComparison.OrdinalIgnoreCase);
+        if (followsWindows) OnUiThread(RestyleEverything);
     }
 
     private async Task CheckAuthAsync()
@@ -1329,12 +1470,14 @@ internal sealed class MainForm : Form
     {
         SystemEvents.SessionSwitch += OnSessionSwitch;
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
+        SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged; // "Match Windows" theme / Windows accent
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         // SystemEvents are static: leaving these attached would keep the window alive and call into it after closing
         SystemEvents.SessionSwitch -= OnSessionSwitch;
+        SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         base.OnFormClosed(e);
     }
@@ -1498,8 +1641,13 @@ internal sealed class MainForm : Form
         UpdateAuthDisplay();
     }
 
+    /// <summary>Sign out is available while signed in (or when AWS couldn't be reached to check), and not mid-sign-in.</summary>
+    private void UpdateSignOutButton() =>
+        _btnSignOut.Enabled = (_authArn != null || _authError != null) && !_busy && !_renewing;
+
     private void UpdateAuthDisplay()
     {
+        UpdateSignOutButton();
         string checkedAt = $"Last checked {_lastAuthCheck:t}. Click for profile settings." +
             (_settings.KeepSignedIn ? "" : "\n\"Keep me signed in\" is off: AWS is only checked when you connect or sign in.");
 
@@ -1581,6 +1729,8 @@ internal sealed class MainForm : Form
                      (new ToolStripItem[] { _btnStart, _smStart, _miStart }, Icons.Start, p.Good),
                      (new ToolStripItem[] { _btnStop, _smStop, _miStop }, Icons.Stop, p.Bad),
                      (new ToolStripItem[] { _btnReboot, _smReboot, _miReboot }, Icons.Reboot, p.Warn),
+                     (new ToolStripItem[] { _btnSignIn }, Icons.SignIn, p.AccentFore),
+                     (new ToolStripItem[] { _btnSignOut }, Icons.SignOut, p.Muted),
                  })
         {
             foreach (var item in items)

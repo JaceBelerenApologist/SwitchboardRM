@@ -35,7 +35,9 @@ internal sealed class StartupContext : ApplicationContext
 
     public StartupContext()
     {
-        _splash = new SplashForm(AppSettings.PeekDarkMode());
+        var look = AppSettings.PeekAppearance();
+        Theme.Configure(new AppSettings { AccentColor = look.Accent }); // the splash in the chosen accent colour
+        _splash = new SplashForm(look.Dark);
         _splash.Show();
         _splash.Refresh(); // paint now, before the main window is built
 

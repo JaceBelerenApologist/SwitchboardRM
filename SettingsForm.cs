@@ -22,7 +22,7 @@ internal sealed class SettingsForm : Form
     private const int ContentWidth = 500;
 
     private readonly AppSettings _settings;
-    private readonly Action<bool> _setDark;
+    private readonly Action _appearanceChanged; // saves and restyles every window
 
     private readonly Panel _sidebar = new() { Dock = DockStyle.Left, Width = 190, Tag = "sidebar", Padding = new Padding(0, 16, 0, 0) };
     private readonly ListBox _nav = new()
@@ -58,18 +58,28 @@ internal sealed class SettingsForm : Form
     private readonly Label _lblCredMsg = Muted("");
 
     // appearance page
-    private readonly ThemedCheckBox _chkDark = new() { Text = "Dark mode", AutoSize = true, Margin = new Padding(0, 8, 0, 4) };
+    // appearance page
+    private readonly ComboBox _cboTheme = new() { Width = 220, DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly ComboBox _cboUiFont = new() { Width = 260, DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly ComboBox _cboListSize = new() { Width = 90, DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly ComboBox _cboTermFont = new() { Width = 260, DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly ComboBox _cboTermSize = new() { Width = 90, DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly List<(AccentSwatch Swatch, string Value)> _swatches = new();
+    private AccentSwatch _windowsSwatch, _customSwatch;
+    private readonly Label _lblAccent = Muted("");
+    private readonly ToolTip _appearanceTips = new();
+    private bool _loadingAppearance;
 
     private readonly string _profileInUse;
     private readonly bool _awsSessionsOpen;
 
-    public SettingsForm(AppSettings settings, string profile, IEnumerable<string> profiles, Action<bool> setDark, Page start,
+    public SettingsForm(AppSettings settings, string profile, IEnumerable<string> profiles, Action appearanceChanged, Page start,
         bool awsSessionsOpen = false)
     {
         _profileInUse = profile;
         _awsSessionsOpen = awsSessionsOpen;
         _settings = settings;
-        _setDark = setDark;
+        _appearanceChanged = appearanceChanged;
 
         Text = "Settings";
         if (AppIcon.Icon != null) Icon = AppIcon.Icon;
@@ -86,7 +96,6 @@ internal sealed class SettingsForm : Form
         if (!string.IsNullOrWhiteSpace(profile) && !_cboProfile.Items.Contains(profile)) _cboProfile.Items.Add(profile);
         _cboProfile.SelectedItem = profile;
         BuildRegionList(settings.ScanRegions);
-        _chkDark.Checked = settings.DarkMode;
         _chkAutoRenew.Checked = settings.KeepSignedIn;
         _chkSignOut.Checked = settings.SignOutOnClose;
         _chkSignOut.CheckedChanged += (_, _) => { _settings.SignOutOnClose = _chkSignOut.Checked; _settings.Save(); };
@@ -110,7 +119,7 @@ internal sealed class SettingsForm : Form
         Theme.Apply(this, Theme.Current.IsDark);
         _nav.Invalidate();
         _lvCreds.Invalidate();
-        if (_chkDark.Checked != Theme.Current.IsDark) _chkDark.Checked = Theme.Current.IsDark;
+        LoadAppearance(); // e.g. View > Dark mode was used while Settings was open
     }
 
     protected override void OnHandleCreated(EventArgs e)
@@ -165,7 +174,7 @@ internal sealed class SettingsForm : Form
                 p.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
         };
         header.Disposed += (_, _) => headerFont.Dispose();
-        _nav.Items.AddRange(new object[] { "AWS profile", "RDP credentials", "SSH", "Appearance", "About" });
+        _nav.Items.AddRange(new object[] { "AWS profile", "RDP credentials", "Terminal & SSH", "Appearance", "About" });
         _nav.DrawItem += DrawNavItem;
         _nav.SelectedIndexChanged += (_, _) => ShowPage(_nav.SelectedIndex);
         _sidebar.Controls.Add(_nav);
@@ -621,6 +630,7 @@ internal sealed class SettingsForm : Form
     // ---------------------------------------------------------------- SSH
 
     private readonly TextBox _txtSshUser = new() { Width = 300 };
+    private readonly ComboBox _cboShell = new() { Width = 300, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly TextBox _txtSshKey = new() { Width = 380 };
 
     private Control BuildSshPage()
@@ -647,10 +657,33 @@ internal sealed class SettingsForm : Form
         var clear = Btn("Clear");
         clear.Click += (_, _) => _txtSshKey.Text = "";
 
+        // default local shell
+        var shells = Shells.Available();
+        foreach (var sh in shells) _cboShell.Items.Add(sh.Name);
+        var current = Shells.Default(_settings.DefaultShell);
+        _cboShell.SelectedIndex = Math.Max(0, shells.FindIndex(x => x.Id == current.Id));
+        _cboShell.SelectedIndexChanged += (_, _) =>
+        {
+            if (_cboShell.SelectedIndex < 0 || _cboShell.SelectedIndex >= shells.Count) return;
+            _settings.DefaultShell = shells[_cboShell.SelectedIndex].Id;
+            _settings.Save();
+        };
+
         string ssh = Tools.Ssh;
         page.Controls.AddRange(new Control[]
         {
-            Title("SSH"),
+            Title("Terminal & SSH"),
+
+            Heading("Local shells"),
+            Muted("Shells on this PC open as tabs: the terminal button on the toolbar, File > New shell (Ctrl+T), or the + " +
+                  "after the last tab. Each starts in your user folder with AWS_PROFILE set to the profile in use and " +
+                  "the bundled AWS tools on its PATH. They run with Switchboard's own rights: for an administrator " +
+                  "shell, run Switchboard as administrator."),
+            FieldLabel("Default shell (Ctrl+T)"),
+            _cboShell,
+            Muted("Terminal font and text size are under Appearance."),
+
+            Heading("SSH"),
             Muted("Linux servers open in an SSH terminal tab. AWS servers are reached through the same Session Manager " +
                   "tunnel as Remote Desktop (to port 22), so they need an SSH server and your key, but no open " +
                   "inbound ports. Server > Connect with SSH / RDP picks the other one for any server."),
@@ -680,18 +713,195 @@ internal sealed class SettingsForm : Form
     private Control BuildAppearancePage()
     {
         var page = NewPage();
-        _chkDark.CheckedChanged += (_, _) =>
+
+        // theme
+        _cboTheme.Items.AddRange(new object[] { "Light", "Dark", "Match Windows" });
+        _cboTheme.SelectedIndexChanged += (_, _) =>
         {
-            if (_chkDark.Checked != Theme.Current.IsDark) _setDark(_chkDark.Checked); // applies to every window
+            if (_loadingAppearance) return;
+            _settings.ThemeMode = _cboTheme.SelectedIndex switch { 1 => "Dark", 2 => "System", _ => "Light" };
+            _appearanceChanged();
         };
+
+        // accent colour swatches: presets, the Windows accent colour, and a custom colour
+        var swatchRow = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, WrapContents = true,
+                                              MaximumSize = new Size(ContentWidth, 0), Margin = new Padding(0, 4, 0, 0) };
+        for (int i = 0; i < Theme.AccentPresets.Length; i++)
+        {
+            var (name, color) = Theme.AccentPresets[i];
+            string value = i == 0 ? "" : ColorMath.Hex(color);   // the default purple is stored as "" (default)
+            var sw = new AccentSwatch { Swatch = color };
+            _appearanceTips.SetToolTip(sw, i == 0 ? name + " (default)" : name);
+            sw.Click += (_, _) => SetAccent(value);
+            _swatches.Add((sw, value));
+            swatchRow.Controls.Add(sw);
+        }
+        _windowsSwatch = new AccentSwatch { Swatch = Theme.WindowsAccent() ?? Color.Gray, Glyph = "W" };
+        _appearanceTips.SetToolTip(_windowsSwatch, "Windows accent colour (follows Windows when it changes)");
+        _windowsSwatch.Click += (_, _) => SetAccent("Windows");
+        swatchRow.Controls.Add(_windowsSwatch);
+
+        _customSwatch = new AccentSwatch { Swatch = Color.Empty, Glyph = "+" };
+        _appearanceTips.SetToolTip(_customSwatch, "Pick any colour ...");
+        _customSwatch.Click += (_, _) =>
+        {
+            using var dlg = new ColorDialog { FullOpen = true, AnyColor = true, Color = Theme.Accent };
+            if (dlg.ShowDialog(this) == DialogResult.OK) SetAccent(ColorMath.Hex(dlg.Color));
+        };
+        swatchRow.Controls.Add(_customSwatch);
+
+        // fonts: only ones installed on this PC are offered (plus the defaults, which have built-in fallbacks)
+        var installed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            using var fonts = new System.Drawing.Text.InstalledFontCollection();
+            foreach (var f in fonts.Families) installed.Add(f.Name);
+        }
+        catch { }
+        FillFonts(_cboUiFont, Theme.DefaultUiFont, installed, new[]
+        {
+            "Segoe UI", "Segoe UI Variable Text", "Aptos", "Calibri", "Arial", "Verdana", "Tahoma", "Trebuchet MS",
+            "Bahnschrift", "Inter", "Open Sans", "Roboto", "Noto Sans", "Source Sans Pro",
+        });
+        FillFonts(_cboTermFont, Theme.DefaultTerminalFont, installed, new[]
+        {
+            "Cascadia Mono", "Cascadia Code", "Consolas", "Lucida Console", "Courier New", "JetBrains Mono",
+            "Fira Code", "Fira Mono", "Source Code Pro", "Hack", "IBM Plex Mono", "Iosevka", "Ubuntu Mono",
+        });
+        for (int pt = 9; pt <= 14; pt++) _cboListSize.Items.Add(pt);
+        for (int pt = 10; pt <= 22; pt++) _cboTermSize.Items.Add(pt);
+
+        _cboUiFont.SelectedIndexChanged += (_, _) =>
+        {
+            if (_loadingAppearance || _cboUiFont.SelectedItem is not FontChoice f) return;
+            _settings.UiFont = f.IsDefault ? "" : f.Family;
+            _appearanceChanged();
+        };
+        _cboListSize.SelectedIndexChanged += (_, _) =>
+        {
+            if (_loadingAppearance || _cboListSize.SelectedItem is not int pt) return;
+            _settings.ListFontSize = pt;
+            _appearanceChanged();
+        };
+        _cboTermFont.SelectedIndexChanged += (_, _) =>
+        {
+            if (_loadingAppearance || _cboTermFont.SelectedItem is not FontChoice f) return;
+            _settings.TerminalFont = f.IsDefault ? "" : f.Family;
+            _appearanceChanged();
+        };
+        _cboTermSize.SelectedIndexChanged += (_, _) =>
+        {
+            if (_loadingAppearance || _cboTermSize.SelectedItem is not int pt) return;
+            _settings.TerminalFontSize = pt;
+            _appearanceChanged();
+        };
+
+        var reset = Btn("Reset appearance");
+        reset.Click += (_, _) =>
+        {
+            _settings.ThemeMode = "";
+            _settings.DarkMode = false;
+            _settings.AccentColor = "";
+            _settings.UiFont = "";
+            _settings.ListFontSize = 10;
+            _settings.TerminalFont = "";
+            _settings.TerminalFontSize = 14;
+            _appearanceChanged();
+        };
+
         page.Controls.AddRange(new Control[]
         {
             Title("Appearance"),
-            Muted("Both looks use the purple accent."),
-            _chkDark,
-            Muted("You can also switch it from View > Dark mode."),
+            Muted("Changes apply straight away, to every window."),
+
+            Heading("Theme"),
+            _cboTheme,
+            Muted("Match Windows follows Windows' light or dark setting, even while Switchboard is open. " +
+                  "View > Dark mode switches quickly between light and dark."),
+
+            Heading("Accent colour"),
+            swatchRow,
+            _lblAccent,
+
+            Heading("Fonts"),
+            FieldLabel("App font"), _cboUiFont,
+            FieldLabel("Server list text size"), _cboListSize,
+            FieldLabel("Terminal font (SSH)"), _cboTermFont,
+            FieldLabel("Terminal text size"), _cboTermSize,
+            Muted("Only fonts installed on this PC are listed."),
+
+            ButtonRow(reset),
         });
+        LoadAppearance();
         return page;
+    }
+
+    /// <summary>A font in a font list: the family, shown as "Name (default)" for the default.</summary>
+    private sealed record FontChoice(string Family, bool IsDefault)
+    {
+        public override string ToString() => IsDefault ? Family + " (default)" : Family;
+    }
+
+    private static void FillFonts(ComboBox combo, string defaultFamily, HashSet<string> installed, string[] candidates)
+    {
+        combo.Items.Add(new FontChoice(defaultFamily, true));
+        foreach (var f in candidates)
+            if (!f.Equals(defaultFamily, StringComparison.OrdinalIgnoreCase) && installed.Contains(f))
+                combo.Items.Add(new FontChoice(f, false));
+    }
+
+    private void SetAccent(string value)
+    {
+        _settings.AccentColor = value;
+        _appearanceChanged();
+    }
+
+    /// <summary>Show the current appearance settings (without triggering changes).</summary>
+    private void LoadAppearance()
+    {
+        if (_swatches.Count == 0) return; // page not built yet
+        _loadingAppearance = true;
+        try
+        {
+            _cboTheme.SelectedIndex = _settings.ThemeMode switch
+            {
+                "Dark" => 1, "System" => 2, "Light" => 0, _ => _settings.DarkMode ? 1 : 0,
+            };
+
+            // accent: which swatch is selected, and what it's called
+            string accent = _settings.AccentColor ?? "";
+            bool isWindows = accent.Equals("Windows", StringComparison.OrdinalIgnoreCase);
+            var preset = _swatches.FirstOrDefault(x => string.Equals(x.Value, accent, StringComparison.OrdinalIgnoreCase));
+            bool isCustom = !isWindows && preset.Swatch == null;
+            foreach (var (sw, _) in _swatches) sw.SetSelected(sw == preset.Swatch);
+            _windowsSwatch.Swatch = Theme.WindowsAccent() ?? Color.Gray;
+            _windowsSwatch.SetSelected(isWindows);
+            _customSwatch.Swatch = isCustom ? Theme.Accent : Color.Empty;
+            _customSwatch.SetSelected(isCustom);
+            _lblAccent.Text = isWindows ? "Windows accent colour (" + ColorMath.Hex(Theme.Accent) + ")"
+                : isCustom ? "Custom colour " + ColorMath.Hex(Theme.Accent)
+                : Theme.AccentPresets[_swatches.IndexOf(preset)].Name + (_swatches.IndexOf(preset) == 0 ? " (default)" : "");
+
+            SelectFont(_cboUiFont, _settings.UiFont);
+            SelectFont(_cboTermFont, _settings.TerminalFont);
+            _cboListSize.SelectedItem = (int)Math.Round(_settings.ListFontSize is >= 9f and <= 14f ? _settings.ListFontSize : 10);
+            _cboTermSize.SelectedItem = _settings.TerminalFontSize is >= 10 and <= 22 ? _settings.TerminalFontSize : 14;
+        }
+        finally { _loadingAppearance = false; }
+    }
+
+    private static void SelectFont(ComboBox combo, string family)
+    {
+        var items = combo.Items.Cast<FontChoice>().ToList();
+        var match = string.IsNullOrWhiteSpace(family)
+            ? items.FirstOrDefault(x => x.IsDefault)
+            : items.FirstOrDefault(x => x.Family.Equals(family, StringComparison.OrdinalIgnoreCase));
+        if (match == null && !string.IsNullOrWhiteSpace(family))
+        {
+            match = new FontChoice(family, false); // chosen earlier, no longer installed: still show it
+            combo.Items.Add(match);
+        }
+        combo.SelectedItem = match ?? items.FirstOrDefault();
     }
 
     // ---------------------------------------------------------------- about
@@ -798,5 +1008,73 @@ internal sealed class SettingsForm : Form
         text.BackColor = Theme.Current.Back;
         f.Shown += (_, _) => { text.SelectionStart = 0; text.SelectionLength = 0; };
         f.ShowDialog(this);
+    }
+}
+
+/// <summary>A round colour swatch for choosing the accent. A ring marks the selected one.</summary>
+internal sealed class AccentSwatch : Control
+{
+    public Color Swatch;   // Color.Empty = no colour yet (drawn as an outline)
+    public string Glyph;   // optional letter on top, e.g. "W" for the Windows accent, "+" for custom
+    private bool _selected, _hover;
+
+    public AccentSwatch()
+    {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                 ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
+        Size = new Size(36, 36);
+        Margin = new Padding(0, 0, 6, 6);
+        Cursor = Cursors.Hand;
+        TabStop = true;
+    }
+
+    public void SetSelected(bool on) { _selected = on; Invalidate(); }
+
+    protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); _hover = true; Invalidate(); }
+    protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); _hover = false; Invalidate(); }
+    protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
+    protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (e.KeyCode is Keys.Space or Keys.Enter) { OnClick(EventArgs.Empty); e.Handled = true; }
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var p = Theme.Current;
+        var g = e.Graphics;
+        g.Clear(BackColor);
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+
+        var outer = new Rectangle(1, 1, Width - 3, Height - 3);
+        if (_selected || _hover || Focused)
+        {
+            using var ring = new Pen(_selected ? p.Text : p.Muted, _selected ? 2.2f : 1.4f);
+            g.DrawEllipse(ring, outer);
+        }
+
+        var inner = Rectangle.Inflate(outer, -5, -5);
+        if (Swatch.IsEmpty)
+        {
+            using var fill = new SolidBrush(p.Surface);
+            using var edge = new Pen(p.Border, 1.4f);
+            g.FillEllipse(fill, inner);
+            g.DrawEllipse(edge, inner);
+        }
+        else
+        {
+            using var fill = new SolidBrush(Swatch);
+            g.FillEllipse(fill, inner);
+        }
+
+        if (!string.IsNullOrEmpty(Glyph))
+        {
+            var color = Swatch.IsEmpty ? p.Text : ColorMath.TextOn(Swatch);
+            using var font = new Font(Theme.UiFont, 9.5f, FontStyle.Bold);
+            TextRenderer.DrawText(g, Glyph, font, inner, color,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        }
     }
 }

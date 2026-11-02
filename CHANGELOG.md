@@ -3,6 +3,38 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.7.0 (2026-11-02)
+
+- Local shells in tabs: Command Prompt, Windows PowerShell, and PowerShell 7, Git Bash and WSL distributions when
+  installed. Open one with the terminal button on the toolbar (the arrow picks which), File > New shell (Ctrl+T),
+  or the + after the last tab. They have a terminal icon on their tab and work like the SSH terminal (copy, paste,
+  fonts, theme); Enter restarts one that has ended.
+- Each shell starts in your user folder with AWS_PROFILE set to the profile in use and the bundled AWS CLI,
+  Session Manager plugin and Node.js on its PATH.
+- Settings > SSH is now Terminal & SSH, with the default shell. Closing Switchboard counts open shells too.
+
+## 2.6.1 (2026-11-02)
+
+- Sign in and Sign out on the toolbar have icons, like the server buttons: a person (in the accent colour) and a
+  power symbol.
+
+## 2.6.0 (2026-11-02)
+
+Customisation, in Settings > Appearance. Everything applies straight away, to every window.
+
+- Theme: Light, Dark, or Match Windows (follows Windows' light/dark setting, even while open).
+- Accent colour: Purple (the default, unchanged), Blue, Teal, Green, Amber, Red, Pink, Graphite, the Windows
+  accent colour (follows it when it changes), or any custom colour. The hover, text and highlight shades are worked
+  out from it, keeping text readable (at least 4.5:1 contrast) and using dark text on light accents.
+- App font (Segoe UI by default, or another installed UI font) and server list text size.
+- SSH terminal font (Cascadia Mono by default, or another installed monospace font) and text size.
+- Reset appearance puts everything back to the defaults.
+
+## 2.5.0 (2026-11-02)
+
+- Sign out button on the toolbar, next to Sign in: signs out of AWS now (removes the profile's temporary keys;
+  open tabs keep running). Enabled while you're signed in. AWS > Sign out still does the same.
+
 ## 2.4.1 (2026-10-27)
 
 - Release packaging: collect-tools.ps1 now also gathers the bundled tools' licences, so a release can be

@@ -20,6 +20,10 @@ internal sealed class TerminalHost : UserControl
 
     private readonly WebView2 _web = new() { Dock = DockStyle.Fill };
     private PseudoConsole _pty;
+    private string _workingDirectory;
+    private IDictionary<string, string> _environment;
+    /// <summary>What Enter does after the session ends, in the end-of-session message: "reconnect" or "restart".</summary>
+    public string EndedAction = "reconnect";
     private string _pendingCommand;
     private int _cols = 120, _rows = 30;
     private bool _ready;
@@ -56,6 +60,14 @@ internal sealed class TerminalHost : UserControl
     }
 
     /// <summary>Run a command in the terminal now, or as soon as the page is ready.</summary>
+    /// <summary>Run a command in a given folder with extra environment variables (used for local shells).</summary>
+    public void Run(string commandLine, string workingDirectory, IDictionary<string, string> environment)
+    {
+        _workingDirectory = workingDirectory;
+        _environment = environment;
+        Run(commandLine);
+    }
+
     public void Run(string commandLine)
     {
         _pty?.Dispose();
@@ -84,7 +96,15 @@ internal sealed class TerminalHost : UserControl
     public void ApplyTheme()
     {
         if (_web.CoreWebView2 == null) return;
-        try { _web.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new { t = "theme", theme = ThemeObject() })); }
+        try
+        {
+            _web.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new
+            {
+                t = "theme",
+                theme = ThemeObject(),
+                font = new { family = FontStack(), size = Theme.TerminalFontSize },
+            }));
+        }
         catch { }
     }
 
@@ -159,16 +179,18 @@ internal sealed class TerminalHost : UserControl
                     if (!ReferenceEquals(_pty, pty)) return; // an earlier session ending after a reconnect
                     _ended = true;
                     Post($"\r\n\x1b[90m[Session ended{(code != 0 ? $" (exit code {code})" : "")}. " +
-                         "Press Enter to reconnect, or close the tab.]\x1b[0m\r\n");
+                         $"Press Enter to {EndedAction}, or close the tab.]\x1b[0m\r\n");
                     SessionEnded?.Invoke(code);
-                }));
+                }),
+                workingDirectory: _workingDirectory,
+                environment: _environment);
             _pty = pty;
         }
         catch (Exception ex)
         {
             Log.Write("Terminal start failed: " + ex);
             _ended = true;
-            Post($"\x1b[31mCouldn't start ssh: {ex.Message}\x1b[0m\r\n");
+            Post($"\x1b[31mCouldn't start: {ex.Message}\x1b[0m\r\n");
         }
     }
 
@@ -200,7 +222,16 @@ internal sealed class TerminalHost : UserControl
             .Replace("/*XTERM_CSS*/", Resource("xterm.css"))
             .Replace("/*XTERM_JS*/", Resource("xterm.js"))
             .Replace("/*FIT_JS*/", Resource("addon-fit.js"))
-            .Replace("/*THEME*/", JsonSerializer.Serialize(ThemeObject()));
+            .Replace("/*THEME*/", JsonSerializer.Serialize(ThemeObject()))
+            .Replace("/*FONT_FAMILY*/", JsonSerializer.Serialize(FontStack()))
+            .Replace("/*FONT_SIZE*/", Theme.TerminalFontSize.ToString());
+    }
+
+    /// <summary>The chosen terminal font, with sensible monospace fonts behind it in case it's missing.</summary>
+    private static string FontStack()
+    {
+        string chosen = Theme.TerminalFont.Replace("'", "");
+        return $"'{chosen}', 'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace";
     }
 
     private static string Resource(string name)
@@ -220,7 +251,7 @@ internal sealed class TerminalHost : UserControl
             ["foreground"] = p.IsDark ? "#E7E7EC" : "#383A42",
             ["cursor"] = Hex(p.Accent),
             ["cursorAccent"] = "#FFFFFF",
-            ["selectionBackground"] = p.IsDark ? "#5B3FA866" : "#7C3AED40",
+            ["selectionBackground"] = ColorMath.Hex(p.Accent) + (p.IsDark ? "66" : "40"), // the accent, see-through
         };
         string[] dark = { "#0C0C0C", "#C50F1F", "#13A10E", "#C19C00", "#0037DA", "#881798", "#3A96DD", "#CCCCCC",
                           "#767676", "#E74856", "#16C60C", "#F9F1A5", "#3B78FF", "#B4009E", "#61D6D6", "#F2F2F2" };

@@ -6,7 +6,7 @@ using System.Windows.Forms;
 namespace SwitchboardRM;
 
 /// <summary>How to connect: Remote Desktop, or an SSH terminal.</summary>
-internal enum Protocol { Rdp, Ssh }
+internal enum Protocol { Rdp, Ssh, Local }   // Local = a shell on this PC (Command Prompt, PowerShell, ...)
 
 /// <summary>A plain Remote Desktop or SSH connection (no AWS), saved by the user.</summary>
 internal sealed class SavedConnection
