@@ -14,6 +14,26 @@ internal interface IMsTscNonScriptable
 }
 
 /// <summary>
+/// The RDP control's events interface. Only the event Switchboard needs is declared; the control's other events
+/// are simply not handled.
+/// </summary>
+[ComVisible(true), Guid("336d5562-efa8-482e-8cb3-c5c0fc7a7db6"), InterfaceType(ComInterfaceType.InterfaceIsIDispatch)]
+public interface IMsTscAxEvents
+{
+    /// <summary>Ctrl+Alt+Left or Ctrl+Alt+Right was pressed inside the session (the control gives up the keyboard).</summary>
+    [DispId(23)] void OnFocusReleased(int iDirection);
+}
+
+/// <summary>Receives the RDP control's events and passes them on.</summary>
+[ComVisible(true), ClassInterface(ClassInterfaceType.None)]
+public sealed class RdpEventSink : IMsTscAxEvents
+{
+    private readonly Action<int> _focusReleased;
+    public RdpEventSink(Action<int> focusReleased) { _focusReleased = focusReleased; }
+    public void OnFocusReleased(int iDirection) => _focusReleased?.Invoke(iDirection);
+}
+
+/// <summary>
 /// Hosts the Windows Remote Desktop ActiveX control (mstscax.dll), the same one mstsc.exe and RDCMan use.
 /// Properties are set by name through COM so no generated interop assembly is needed.
 /// </summary>
@@ -33,6 +53,13 @@ internal sealed class RdpHost : AxHost
         "AdvancedSettings9", "AdvancedSettings8", "AdvancedSettings7", "AdvancedSettings6",
         "AdvancedSettings5", "AdvancedSettings4", "AdvancedSettings3", "AdvancedSettings2",
     };
+
+    /// <summary>
+    /// Ctrl+Alt+Left (negative) or Ctrl+Alt+Right (positive) was pressed inside the session: the only keys the
+    /// control hands back, used to move between tabs. Raised on the UI thread.
+    /// </summary>
+    public event Action<int> FocusReleased;
+    private ConnectionPointCookie _events;
 
     private readonly System.Windows.Forms.Timer _resizeTimer = new() { Interval = 400 };
     private Size _lastSent;
@@ -79,6 +106,9 @@ internal sealed class RdpHost : AxHost
         // Direct: check it and warn if it can't be verified, like mstsc does.
         Try(() => Set(adv, "AuthenticationLevel", direct ? 2u : 0u));
         Try(() => Set(adv, "RedirectClipboard", true));
+        // Ctrl+Alt+Left / Ctrl+Alt+Right hand the keyboard back to Switchboard (next / previous tab)
+        Try(() => Set(adv, "HotKeyFocusReleaseLeft", 0x25));   // VK_LEFT
+        Try(() => Set(adv, "HotKeyFocusReleaseRight", 0x27));  // VK_RIGHT
 
         if (!string.IsNullOrEmpty(password))
         {
@@ -92,6 +122,27 @@ internal sealed class RdpHost : AxHost
 
         Call(rdp, "Connect");
         _lastSent = size;
+    }
+
+    /// <summary>Subscribe to the control's events once it exists.</summary>
+    protected override void CreateSink()
+    {
+        try
+        {
+            var sink = new RdpEventSink(direction =>
+            {
+                Log.Write($"RDP released the keyboard (direction {direction})");
+                if (!IsDisposed && IsHandleCreated) BeginInvoke(() => FocusReleased?.Invoke(direction));
+            });
+            _events = new ConnectionPointCookie(GetOcx(), sink, typeof(IMsTscAxEvents));
+        }
+        catch (Exception ex) { Log.Write("RDP control events aren't available: " + ex.Message); }
+    }
+
+    protected override void DetachSink()
+    {
+        try { _events?.Disconnect(); } catch { }
+        _events = null;
     }
 
     protected override void OnResize(EventArgs e)

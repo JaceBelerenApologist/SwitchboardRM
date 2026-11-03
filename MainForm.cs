@@ -13,7 +13,8 @@ internal sealed class Session
     public Protocol Kind = Protocol.Rdp;
     public Tunnel Tunnel;
     public RdpHost Rdp;          // Remote Desktop sessions
-    public TerminalHost Term;    // SSH sessions
+    public TerminalHost Term;    // SSH sessions and local shells
+    public bool Docked;          // in the docked-terminal panel under the tabs, not a tab of its own
     public TabPage Page;
     public DateTime Started = DateTime.Now;
     public bool SawActivity;
@@ -99,7 +100,23 @@ internal sealed class MainForm : Form
     private readonly ToolStripMenuItem _miNewShell = new("New &shell") { ShortcutKeys = Keys.Control | Keys.T };
     private readonly ToolStripMenuItem _miShellMenu = new("Open shell");
     private readonly ContextMenuStrip _shellMenu = new();
+
+    // docked terminals: one shared panel under the tabs, with its own tab strip
+    private readonly SplitContainer _dockSplit = new()
+    {
+        Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, FixedPanel = FixedPanel.Panel2,
+        Panel2Collapsed = true, SplitterWidth = 6,
+    };
+    private readonly ThemedTabControl _dockTabs = new() { Dock = DockStyle.Fill };
+    private readonly ToolStrip _dockBar = new() { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.Top, Padding = new Padding(6, 0, 4, 0) };
+    private readonly ToolStripButton _btnUndock = new(Icons.Undock) { Alignment = ToolStripItemAlignment.Right, ToolTipText = "Move this terminal back to a tab" };
+    private readonly ToolStripButton _btnHideDock = new(Icons.HideDown) { Alignment = ToolStripItemAlignment.Right, ToolTipText = "Hide the docked terminals (Ctrl+`). They keep running." };
+    private readonly ToolStripButton _btnCloseDocked = new(Icons.CloseX) { Alignment = ToolStripItemAlignment.Right, ToolTipText = "Close this terminal" };
+    private readonly ToolStripMenuItem _miDock = new("Docked &terminals") { ShortcutKeyDisplayString = "Ctrl+`" };
+    private readonly ToolStripMenuItem _tabMenuDock = new("Dock to bottom");
     private readonly ToolStripMenuItem _smAdd = new("&Add RDP connection ...");
+    private readonly ToolStripMenuItem _smAdHoc = new("Connect to a &computer ...");
+    private readonly Dictionary<string, string> _adHocPasswords = new();   // one-off connections: memory only
     private readonly ToolStripMenuItem _smEdit = new("&Edit connection ...");
     private readonly ToolStripMenuItem _smRemove = new("Remo&ve connection ...");
     private readonly ToolStripMenuItem _miAdd = new("Add RDP connection ...");
@@ -287,6 +304,18 @@ internal sealed class MainForm : Form
         view.DropDownItems.Add(_miDark);
         view.DropDownItems.Add(_miList);
         view.DropDownItems.Add(new ToolStripSeparator());
+        var miNextTab = new ToolStripMenuItem("&Next tab", null, (_, _) => SwitchTab(+1)) { ShortcutKeyDisplayString = "Ctrl+Tab" };
+        var miPrevTab = new ToolStripMenuItem("&Previous tab", null, (_, _) => SwitchTab(-1)) { ShortcutKeyDisplayString = "Ctrl+Shift+Tab" };
+        var miCloseTab = new ToolStripMenuItem("&Close tab ...", null, (_, _) => CloseCurrentTab()) { ShortcutKeyDisplayString = "Ctrl+Shift+W" };
+        view.DropDownItems.AddRange(new ToolStripItem[] { miNextTab, miPrevTab, miCloseTab, _miDock });
+        view.DropDownOpening += (_, _) =>
+        {
+            miNextTab.Enabled = miPrevTab.Enabled = _tabs.TabCount > 1;
+            miCloseTab.Enabled = _tabs.TabCount > 0;
+            _miDock.Enabled = _dockTabs.TabCount > 0;
+            _miDock.Checked = _dockTabs.TabCount > 0 && !_dockSplit.Panel2Collapsed;
+        };
+        view.DropDownItems.Add(new ToolStripSeparator());
         view.DropDownItems.Add(new ToolStripMenuItem("&Refresh server list", null, async (_, _) => await RefreshAsync())
         { ShortcutKeys = Keys.F5 });
 
@@ -311,7 +340,7 @@ internal sealed class MainForm : Form
             new ToolStripSeparator(),
             _smCopyId, _smCopyIp,
             new ToolStripSeparator(),
-            _smAdd, _smEdit, _smRemove,
+            _smAdHoc, _smAdd, _smEdit, _smRemove,
             ImportMenu(),
         });
         server.DropDownOpening += (_, _) => UpdateActionStates();
@@ -435,10 +464,35 @@ internal sealed class MainForm : Form
         _hint.ForeColor = SystemColors.GrayText;
         _hint.Font = new Font("Segoe UI", 11F);
         _hint.Text = DefaultHint;
-        _split.Panel2.Controls.Add(_tabs);
-        _split.Panel2.Controls.Add(_hint);
+        _dockSplit.Panel1.Controls.Add(_tabs);
+        _dockSplit.Panel1.Controls.Add(_hint);
+        // the docked-terminal panel: a header (title + Move to tab / Hide / Close) above its own tab strip
+        _dockBar.Items.Add(new ToolStripLabel("Docked terminals"));
+        foreach (var b in new[] { _btnCloseDocked, _btnHideDock, _btnUndock })   // right-aligned: first added sits furthest right
+        {
+            b.Font = Icons.Font;
+            b.DisplayStyle = ToolStripItemDisplayStyle.Text;
+            b.Padding = new Padding(4, 0, 4, 0);
+            _dockBar.Items.Add(b);
+        }
+        _dockSplit.Panel2.Controls.Add(_dockBar);
+        _dockSplit.Panel2.Controls.Add(_dockTabs);
+        _dockTabs.BringToFront();   // fills what the header leaves
+        _split.Panel2.Controls.Add(_dockSplit);
 
+        _tabMenu.Items.Add(_tabMenuDock);
         _tabMenu.Items.Add("Close tab", null, (_, _) => { if (_menuTarget != null) CloseSession(_menuTarget); });
+        _tabMenu.Opening += (_, e) =>
+        {
+            // only terminals can dock (a remote desktop would lose its connection if moved)
+            _tabMenuDock.Visible = _menuTarget?.Term != null;
+            _tabMenuDock.Text = _menuTarget is { Docked: true } ? "Move back to a tab" : "Dock to bottom";
+        };
+        _tabMenuDock.Click += (_, _) =>
+        {
+            if (_menuTarget == null) return;
+            if (_menuTarget.Docked) UndockSession(_menuTarget); else DockSession(_menuTarget);
+        };
 
         _split.Dock = DockStyle.Fill;
         Controls.Add(_tool);
@@ -515,6 +569,30 @@ internal sealed class MainForm : Form
         };
 
         _tabs.MouseUp += OnTabMouseUp;
+
+        // docked terminals
+        _dockTabs.MouseUp += OnTabMouseUp;
+        _dockTabs.CloseRequested += page => { var d = _sessions.FirstOrDefault(x => x.Page == page); if (d != null) CloseSession(d); };
+        _dockTabs.NewTabRequested += screen =>
+        {
+            FillShellMenu(_shellMenu.Items, _shellMenu, docked: true);
+            _shellMenu.Show(screen);
+        };
+        _dockTabs.SelectedIndexChanged += (_, _) => _sessions.FirstOrDefault(x => x.Page == _dockTabs.SelectedTab)?.Term?.FocusTerminal();
+        _btnUndock.Click += (_, _) => { var d = SelectedDocked(); if (d != null) UndockSession(d); };
+        _btnHideDock.Click += (_, _) => ShowDock(false);
+        _btnCloseDocked.Click += (_, _) => CloseWithConfirm(SelectedDocked());
+        _dockSplit.SplitterMoved += (_, _) =>
+        {
+            if (!_dockSplit.Panel2Collapsed)
+                _settings.DockHeight = _dockSplit.Height - _dockSplit.SplitterDistance - _dockSplit.SplitterWidth;
+        };
+        _dockSplit.MouseDoubleClick += (_, _) =>   // double-click the bar: back to a third of the height
+        {
+            _settings.DockHeight = Math.Max(120, _dockSplit.Height / 3);
+            ApplyDockHeight();
+        };
+        _miDock.Click += (_, _) => ToggleDock();
         // local shells: toolbar button (click = default, arrow = choose), File menu, Ctrl+T, and the tab strip's +
         _btnShell.ButtonClick += async (_, _) => await OpenShellAsync(Shells.Default(_settings.DefaultShell));
         _btnShell.DropDownOpening += (_, _) => FillShellMenu(_btnShell.DropDownItems, _btnShell.DropDown);
@@ -523,9 +601,15 @@ internal sealed class MainForm : Form
         _miShellMenu.DropDownOpening += (_, _) => FillShellMenu(_miShellMenu.DropDownItems, _miShellMenu.DropDown);
         _tabs.NewTabRequested += screen =>
         {
+            // the main tabs' +: a one-off connection, then the shells (the docked panel's + is shells only)
             FillShellMenu(_shellMenu.Items, _shellMenu);
+            _shellMenu.Items.Insert(0, new ToolStripMenuItem("Remote Desktop to a computer ...", null,
+                async (_, _) => await ConnectAdHocAsync()));
+            _shellMenu.Items.Insert(1, new ToolStripSeparator());
+            Theme.ApplyMenu(_shellMenu);
             _shellMenu.Show(screen);
         };
+        _smAdHoc.Click += async (_, _) => await ConnectAdHocAsync();
         _tabs.CloseRequested += page =>
         {
             var s = _sessions.FirstOrDefault(x => x.Page == page);
@@ -536,12 +620,15 @@ internal sealed class MainForm : Form
             var sel = _sessions.FirstOrDefault(x => x.Page == _tabs.SelectedTab);
             sel?.Rdp?.SyncSize();
             sel?.Term?.FocusTerminal();
+            if (sel?.Rdp != null) { try { sel.Rdp.Focus(); } catch { } }
         };
         _timer.Tick += (_, _) => PollSessions();
         _timer.Start();
         _authTimer.Tick += async (_, _) => await AuthHeartbeatAsync();
         _authTimer.Start();
         WatchSessionState();
+        _rdpKeys = new RdpTabKeys(this);
+        Application.AddMessageFilter(_rdpKeys);   // Ctrl+Alt+Left/Right inside Remote Desktop tabs
     }
 
     protected override void OnShown(EventArgs e)
@@ -549,6 +636,8 @@ internal sealed class MainForm : Form
         base.OnShown(e);
         try
         {
+            _dockSplit.Panel1MinSize = 150;
+            _dockSplit.Panel2MinSize = 80;
             _split.Panel1MinSize = 150;
             _split.Panel2MinSize = 200;
             _split.SplitterDistance = Math.Clamp(_settings.ListWidth, 150, Math.Max(150, _split.Width - 200));
@@ -951,6 +1040,7 @@ internal sealed class MainForm : Form
 
             var page = new TabPage(inst.Name) { BackColor = Theme.Current.Back };
             var host = new RdpHost(clsid) { Dock = DockStyle.Fill };
+            host.FocusReleased += direction => SwitchTab(direction < 0 ? -1 : +1);   // Ctrl+Alt+Left / Right
             page.Controls.Add(host);
             _tabs.TabPages.Add(page);
             _tabs.Visible = true;
@@ -975,10 +1065,220 @@ internal sealed class MainForm : Form
         finally { _opening.Remove(openingKey); }
     }
 
+    // ---------------------------------------------------------------- tab keys
+
+    /// <summary>
+    /// Keys while the main window itself has focus (list, toolbar ...). Inside a terminal the page catches them
+    /// (OnAppShortcut); inside a remote desktop only Ctrl+Alt+Left/Right get through (RdpHost.FocusReleased).
+    /// </summary>
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        switch (keyData)
+        {
+            case Keys.Control | Keys.Tab:
+            case Keys.Control | Keys.Alt | Keys.Right:
+                if (_tabs.TabCount > 0) { SwitchTab(+1); return true; }
+                break;
+            case Keys.Control | Keys.Shift | Keys.Tab:
+            case Keys.Control | Keys.Alt | Keys.Left:
+                if (_tabs.TabCount > 0) { SwitchTab(-1); return true; }
+                break;
+            case Keys.Control | Keys.Shift | Keys.W:
+                if (_tabs.TabCount > 0) { CloseCurrentTab(); return true; }
+                break;
+            case Keys.Control | Keys.Shift | Keys.T:
+                _ = OpenShellAsync(Shells.Default(_settings.DefaultShell));
+                return true;
+            case Keys.Control | Keys.Oemtilde:   // Ctrl+`
+                ToggleDock();
+                return true;
+        }
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    private RdpTabKeys _rdpKeys;
+
+    /// <summary>
+    /// Ctrl+Alt+Left / Ctrl+Alt+Right inside a Remote Desktop tab. The remote desktop's input window runs on this
+    /// app's UI thread, so its key presses pass through the app's message loop first: they're caught here,
+    /// switch tabs, and never reach the remote computer. (RdpHost.FocusReleased is the fallback.)
+    /// </summary>
+    private sealed class RdpTabKeys : IMessageFilter
+    {
+        private const int WM_KEYDOWN = 0x0100, WM_SYSKEYDOWN = 0x0104;
+        private const int VK_SHIFT = 0x10, VK_CONTROL = 0x11, VK_MENU = 0x12;
+        private readonly MainForm _form;
+
+        public RdpTabKeys(MainForm form) { _form = form; }
+
+        public bool PreFilterMessage(ref Message m)
+        {
+            if (m.Msg != WM_KEYDOWN && m.Msg != WM_SYSKEYDOWN) return false;
+            var key = (Keys)(int)m.WParam & Keys.KeyCode;
+            if (key != Keys.Left && key != Keys.Right) return false;
+            if (!IsDown(VK_CONTROL) || !IsDown(VK_MENU) || IsDown(VK_SHIFT)) return false;
+            if (!_form.IsInRemoteDesktop(m.HWnd)) return false;
+
+            // held down: swallow the repeats rather than racing through the tabs
+            bool repeat = ((long)m.LParam & (1L << 30)) != 0;
+            if (!repeat) _form.BeginInvoke(() => _form.SwitchTab(key == Keys.Left ? -1 : +1));
+            return true;   // the remote computer doesn't get it
+        }
+
+        private static bool IsDown(int vk) => (GetKeyState(vk) & 0x8000) != 0;
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern short GetKeyState(int vk);
+    }
+
+    /// <summary>Is this window one of the Remote Desktop controls, or inside one?</summary>
+    private bool IsInRemoteDesktop(IntPtr hwnd)
+    {
+        foreach (var s in _sessions)
+        {
+            if (s.Rdp == null || s.Rdp.IsDisposed || !s.Rdp.IsHandleCreated) continue;
+            if (hwnd == s.Rdp.Handle || IsChild(s.Rdp.Handle, hwnd)) return true;
+        }
+        return false;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool IsChild(IntPtr parent, IntPtr child);
+
+    /// <summary>A tab key pressed inside a terminal tab.</summary>
+    private void OnAppShortcut(string key, Session from)
+    {
+        bool docked = from is { Docked: true };
+        switch (key)
+        {
+            case "next": SwitchTabIn(docked ? _dockTabs : _tabs, +1); break;
+            case "prev": SwitchTabIn(docked ? _dockTabs : _tabs, -1); break;
+            case "close": CloseWithConfirm(from ?? _sessions.FirstOrDefault(x => x.Page == _tabs.SelectedTab)); break;
+            case "newshell": _ = OpenShellAsync(Shells.Default(_settings.DefaultShell), docked); break;
+            case "dock": ToggleDock(); break;
+        }
+    }
+
+    /// <summary>Move to the next (+1) or previous (-1) tab, wrapping around at the ends, and give it the keyboard.</summary>
+    private void SwitchTab(int direction) => SwitchTabIn(_tabs, direction);
+
+    /// <summary>Next / previous tab within one tab strip (the main tabs, or the docked terminals).</summary>
+    private void SwitchTabIn(TabControl strip, int direction)
+    {
+        int count = strip.TabCount;
+        if (count == 0) return;
+        int next = ((strip.SelectedIndex + direction) % count + count) % count;
+        if (next != strip.SelectedIndex) strip.SelectedIndex = next;   // SelectedIndexChanged focuses the new tab
+        else
+        {
+            var only = _sessions.FirstOrDefault(x => x.Page == strip.SelectedTab);   // one tab: just give it focus back
+            only?.Term?.FocusTerminal();
+            if (only?.Rdp != null) { try { only.Rdp.Focus(); } catch { } }
+        }
+    }
+
+    /// <summary>Close the tab in front, after asking (keyboard and menu; × and middle-click close straight away).</summary>
+    private void CloseCurrentTab() => CloseWithConfirm(_sessions.FirstOrDefault(x => x.Page == _tabs.SelectedTab));
+
+    /// <summary>Close a tab or docked terminal after asking.</summary>
+    private void CloseWithConfirm(Session s)
+    {
+        if (s == null) return;
+        string question = s.Kind == Protocol.Local
+            ? $"Close {s.Inst.Name}?\n\nAnything still running in it will stop."
+            : $"Disconnect from {s.Inst.Name}?\n\nThe server keeps running; only this tab closes.";
+        if (!Ask(question))
+        {
+            // back to the tab's content, so the keys go where they were going
+            s.Term?.FocusTerminal();
+            if (s.Rdp != null) { try { s.Rdp.Focus(); } catch { } }
+            return;
+        }
+        bool wasDocked = s.Docked;
+        CloseSession(s);
+        // keep going from the tab that's now in front
+        var next = _sessions.FirstOrDefault(x => x.Page == (wasDocked && _dockTabs.TabCount > 0 ? _dockTabs : _tabs).SelectedTab);
+        next?.Term?.FocusTerminal();
+        if (next?.Rdp != null) { try { next.Rdp.Focus(); } catch { } }
+    }
+
+    // ---------------------------------------------------------------- docked terminals
+
+    private Session SelectedDocked() => _sessions.FirstOrDefault(x => x.Docked && x.Page == _dockTabs.SelectedTab);
+
+    /// <summary>Move a terminal from its tab into the docked panel; it carries on running.</summary>
+    private void DockSession(Session s)
+    {
+        if (s?.Term == null || s.Docked) return;
+        _tabs.TabPages.Remove(s.Page);
+        s.Docked = true;
+        _dockTabs.TabPages.Add(s.Page);
+        _dockTabs.SelectedTab = s.Page;
+        UpdateMainTabsVisibility();
+        ShowDock(true);
+        s.Term.FocusTerminal();
+    }
+
+    /// <summary>Move a docked terminal back to a tab of its own.</summary>
+    private void UndockSession(Session s)
+    {
+        if (s == null || !s.Docked) return;
+        _dockTabs.TabPages.Remove(s.Page);
+        s.Docked = false;
+        _tabs.TabPages.Add(s.Page);
+        _tabs.SelectedTab = s.Page;
+        UpdateMainTabsVisibility();
+        if (_dockTabs.TabCount == 0) ShowDock(false);
+        s.Term?.FocusTerminal();
+    }
+
+    private void UpdateMainTabsVisibility()
+    {
+        bool any = _tabs.TabCount > 0;
+        _tabs.Visible = any;
+        _hint.Visible = !any;
+    }
+
+    /// <summary>Show or hide the docked panel (hidden terminals keep running). Never shown empty.</summary>
+    private void ShowDock(bool show)
+    {
+        if (_dockTabs.TabCount == 0) show = false;
+        if (_dockSplit.Panel2Collapsed == !show) return;
+        _dockSplit.Panel2Collapsed = !show;
+        if (show)
+        {
+            ApplyDockHeight();
+            SelectedDocked()?.Term?.FocusTerminal();
+        }
+    }
+
+    /// <summary>View > Docked terminals, Ctrl+`.</summary>
+    private void ToggleDock()
+    {
+        if (_dockTabs.TabCount == 0)
+        {
+            SetStatus("No docked terminals yet: right-click a terminal tab and choose Dock to bottom.");
+            return;
+        }
+        ShowDock(_dockSplit.Panel2Collapsed);
+    }
+
+    /// <summary>Put the bar where the remembered panel height says, within sensible limits.</summary>
+    private void ApplyDockHeight()
+    {
+        try
+        {
+            int total = _dockSplit.Height - _dockSplit.SplitterWidth;
+            int h = Math.Clamp(_settings.DockHeight, 80, Math.Max(80, total - 150));
+            _dockSplit.SplitterDistance = Math.Max(_dockSplit.Panel1MinSize, total - h);
+        }
+        catch { /* window too small right now */ }
+    }
+
     // ---------------------------------------------------------------- local shells
 
     /// <summary>One menu entry per shell on this PC (the default marked), in a toolbar, File or + menu.</summary>
-    private void FillShellMenu(ToolStripItemCollection items, ToolStrip owner)
+    private void FillShellMenu(ToolStripItemCollection items, ToolStrip owner, bool docked = false)
     {
         items.Clear();
         var def = Shells.Default(_settings.DefaultShell);
@@ -986,7 +1286,7 @@ internal sealed class MainForm : Form
         {
             var item = new ToolStripMenuItem(shell.Id == def.Id ? shell.Name + "  (default, Ctrl+T)" : shell.Name);
             var chosen = shell;
-            item.Click += async (_, _) => await OpenShellAsync(chosen);
+            item.Click += async (_, _) => await OpenShellAsync(chosen, docked);
             items.Add(item);
         }
         Theme.ApplyMenu(owner);
@@ -1005,8 +1305,9 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>Open a local shell in a new tab, starting in the user folder.</summary>
-    private async Task OpenShellAsync(ShellInfo shell)
+    private async Task OpenShellAsync(ShellInfo shell, bool docked = false)
     {
+        docked |= _settings.DockNewTerminals;   // Settings > Terminal & SSH > Open new terminals docked
         // "PowerShell", then "PowerShell 2", "PowerShell 3" ... for more of the same kind
         var used = new HashSet<string>(_sessions.Where(x => x.Kind == Protocol.Local).Select(x => x.Inst.Name));
         string name = shell.Name;
@@ -1015,14 +1316,23 @@ internal sealed class MainForm : Form
         var inst = new Instance { Name = name, Id = "shell:" + Guid.NewGuid().ToString("N"), Type = shell.Id };
         var page = new TabPage(ThemedTabControl.IconSpace + name) { BackColor = Theme.Current.Back, Tag = ThemedTabControl.ShellTag };
         var term = new TerminalHost { Dock = DockStyle.Fill, EndedAction = "restart" };
+        term.AppShortcut += key => OnAppShortcut(key, _sessions.FirstOrDefault(x => x.Term == term));
         page.Controls.Add(term);
-        _tabs.TabPages.Add(page);
-        _tabs.Visible = true;
-        _hint.Visible = false;
-        _tabs.SelectedTab = page;
-
-        var session = new Session { Inst = inst, Kind = Protocol.Local, Term = term, Page = page };
+        var session = new Session { Inst = inst, Kind = Protocol.Local, Term = term, Page = page, Docked = docked };
         _sessions.Add(session);
+        if (docked)
+        {
+            _dockTabs.TabPages.Add(page);
+            _dockTabs.SelectedTab = page;
+            ShowDock(true);
+        }
+        else
+        {
+            _tabs.TabPages.Add(page);
+            _tabs.Visible = true;
+            _hint.Visible = false;
+            _tabs.SelectedTab = page;
+        }
         string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         term.SessionEnded += _ => page.Text = ThemedTabControl.IconSpace + name + " (ended)";
         term.ReconnectRequested += () =>
@@ -1072,14 +1382,23 @@ internal sealed class MainForm : Form
 
         var page = new TabPage(inst.Name + " · SSH") { BackColor = Theme.Current.Back };
         var term = new TerminalHost { Dock = DockStyle.Fill };
+        term.AppShortcut += key => OnAppShortcut(key, _sessions.FirstOrDefault(x => x.Term == term));
         page.Controls.Add(term);
-        _tabs.TabPages.Add(page);
-        _tabs.Visible = true;
-        _hint.Visible = false;
-        _tabs.SelectedTab = page;
-
-        var session = new Session { Inst = inst, Kind = Protocol.Ssh, Term = term, Page = page };
+        var session = new Session { Inst = inst, Kind = Protocol.Ssh, Term = term, Page = page, Docked = _settings.DockNewTerminals };
         _sessions.Add(session);
+        if (session.Docked)
+        {
+            _dockTabs.TabPages.Add(page);
+            _dockTabs.SelectedTab = page;
+            ShowDock(true);
+        }
+        else
+        {
+            _tabs.TabPages.Add(page);
+            _tabs.Visible = true;
+            _hint.Visible = false;
+            _tabs.SelectedTab = page;
+        }
         term.SessionEnded += _ =>
         {
             page.Text = inst.Name + " · SSH (ended)";
@@ -1205,7 +1524,9 @@ internal sealed class MainForm : Form
         // the connection's own user if it has one, else the default from Settings > RDP credentials;
         // no saved password means Remote Desktop asks
         string user = s.Inst.Saved is { User.Length: > 0 } c ? c.User.Trim() : (_settings.Username ?? "").Trim();
-        string password = CredentialStore.Read(user) ?? "";
+        string password = s.Inst.Saved != null && _adHocPasswords.TryGetValue(s.Inst.Saved.Id, out var oneOff)
+            ? oneOff                                  // typed for a one-off connection, never stored
+            : CredentialStore.Read(user) ?? "";
         bool direct = s.Inst.IsSaved;
         string server = direct ? s.Inst.Saved.Host : "localhost";
         int port = direct ? s.Inst.Saved.Port : s.Tunnel.Port;
@@ -1266,22 +1587,21 @@ internal sealed class MainForm : Form
         _sessions.Remove(s);
         try { s.Rdp?.SafeDisconnect(); } catch { }
         try { s.Term?.Dispose(); } catch { }  // ends ssh
-        try { _tabs.TabPages.Remove(s.Page); } catch { }
+        if (s.Inst?.Saved != null) _adHocPasswords.Remove(s.Inst.Saved.Id);
+        try { (s.Docked ? _dockTabs : _tabs).TabPages.Remove(s.Page); } catch { }
         try { s.Page.Dispose(); } catch { }
         s.Tunnel?.Dispose(); // saved connections have no tunnel
-        if (_tabs.TabPages.Count == 0)
-        {
-            _tabs.Visible = false;
-            _hint.Visible = true;
-        }
+        UpdateMainTabsVisibility();
+        if (_dockTabs.TabCount == 0) ShowDock(false);
     }
 
     private void OnTabMouseUp(object sender, MouseEventArgs e)
     {
-        for (int i = 0; i < _tabs.TabCount; i++)
+        var strip = sender as TabControl ?? _tabs;
+        for (int i = 0; i < strip.TabCount; i++)
         {
-            if (!_tabs.GetTabRect(i).Contains(e.Location)) continue;
-            var page = _tabs.TabPages[i];
+            if (!strip.GetTabRect(i).Contains(e.Location)) continue;
+            var page = strip.TabPages[i];
             var session = _sessions.FirstOrDefault(x => x.Page == page);
             if (session == null) return;
 
@@ -1289,7 +1609,7 @@ internal sealed class MainForm : Form
             else if (e.Button == MouseButtons.Right)
             {
                 _menuTarget = session;
-                _tabMenu.Show(_tabs, e.Location);
+                _tabMenu.Show(strip, e.Location);
             }
             return;
         }
@@ -1477,6 +1797,7 @@ internal sealed class MainForm : Form
     {
         // SystemEvents are static: leaving these attached would keep the window alive and call into it after closing
         SystemEvents.SessionSwitch -= OnSessionSwitch;
+        if (_rdpKeys != null) Application.RemoveMessageFilter(_rdpKeys);
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         base.OnFormClosed(e);
@@ -1989,6 +2310,37 @@ internal sealed class MainForm : Form
             if (idx >= 0) _all[idx] = fresh;
             UpdateRow(fresh);
         }));
+    }
+
+    /// <summary>
+    /// Connect to any computer now (RDP or SSH), without adding it to Saved connections unless asked to.
+    /// A password typed for a one-off connection stays in memory for that tab only.
+    /// </summary>
+    private async Task ConnectAdHocAsync()
+    {
+        using var f = new ConnectionForm(null, _settings.Username, adHoc: true);
+        if (f.ShowDialog(this) != DialogResult.OK || f.Result == null) return;
+        var c = f.Result;
+
+        if (f.SaveRequested)
+        {
+            _saved.Add(c);
+            ConnectionStore.Save(_saved);
+            if (f.Password.Length > 0)
+            {
+                try { CredentialStore.Save(f.EffectiveUser, f.Password); }
+                catch (Exception ex) { Log.Write("Could not save password: " + ex.Message); }
+            }
+            ComposeList();
+            RebuildList();
+            _ = ProbeSavedAsync(new[] { c });
+        }
+        else if (f.Password.Length > 0)
+        {
+            _adHocPasswords[c.Id] = f.Password;
+        }
+
+        await ConnectAsync(ConnectionStore.ToInstance(c, null));
     }
 
     private void AddOrEditConnection(SavedConnection editing)

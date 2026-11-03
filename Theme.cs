@@ -440,6 +440,9 @@ internal static class Icons
     public const string SignIn = "\uE77B";   // person
     public const string SignOut = "\uE7E8";  // power
     public const string Terminal = "\uE756"; // command prompt
+    public const string Undock = "\uE8A7";   // open in a new window (back to a tab)
+    public const string HideDown = "\uE70D"; // chevron down
+    public const string CloseX = "\uE711";   // ×
 
     /// <summary>A glyph drawn into a transparent square bitmap, for ToolStrip items that show an icon and text.</summary>
     public static Bitmap Render(string glyph, Color color, int px)
@@ -648,6 +651,7 @@ internal sealed class ThemedTabControl : TabControl
     private const int CloseSize = 16;
     private const int PlusSize = 22;
     private const int WM_LBUTTONDOWN = 0x0201;
+    private const int WM_NCHITTEST = 0x0084, HTTRANSPARENT = -1, HTCLIENT = 1;
     private int _hoverClose = -1;
     private bool _hoverPlus;
 
@@ -680,6 +684,15 @@ internal sealed class ThemedTabControl : TabControl
 
     protected override void WndProc(ref Message m)
     {
+        // The Windows tab control calls the empty part of its tab strip "transparent", so clicks and hovers
+        // there go to the window behind it. Claim it, so the + (and its hover highlight) work.
+        if (m.Msg == WM_NCHITTEST)
+        {
+            base.WndProc(ref m);
+            if ((int)m.Result == HTTRANSPARENT) m.Result = (IntPtr)HTCLIENT;
+            return;
+        }
+
         // Catch the click before Windows selects the tab, so closing a background tab doesn't switch to it first.
         if (m.Msg == WM_LBUTTONDOWN)
         {

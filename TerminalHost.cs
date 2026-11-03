@@ -17,6 +17,8 @@ internal sealed class TerminalHost : UserControl
     public event Action<int> SessionEnded;
     /// <summary>The user pressed Enter after the session ended. Raised on the UI thread.</summary>
     public event Action ReconnectRequested;
+    /// <summary>One of Switchboard's tab keys inside the terminal: "next", "prev", "close" or "newshell". UI thread.</summary>
+    public event Action<string> AppShortcut;
 
     private readonly WebView2 _web = new() { Dock = DockStyle.Fill };
     private PseudoConsole _pty;
@@ -152,6 +154,10 @@ internal sealed class TerminalHost : UserControl
                         return;
                     }
                     _pty?.Write(d);
+                    break;
+
+                case "key":
+                    AppShortcut?.Invoke(m.GetProperty("k").GetString());
                     break;
 
                 case "copy":

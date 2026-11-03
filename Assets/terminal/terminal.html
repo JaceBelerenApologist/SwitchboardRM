@@ -44,8 +44,29 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #1c1c21; }
   // keystrokes and native paste (Ctrl+V / Ctrl+Shift+V) go to ssh
   term.onData(d => host.postMessage({ t: 'in', d: d }));
 
+  // Switchboard's tab keys, taken before the shell sees them:
+  //   Ctrl+Tab / Ctrl+Alt+Right = next tab, Ctrl+Shift+Tab / Ctrl+Alt+Left = previous tab,
+  //   Ctrl+Shift+W = close tab, Ctrl+Shift+T = new shell (plain Ctrl+W / Ctrl+T stay with the shell)
+  function appShortcut(ev) {
+    if (!ev.ctrlKey) return null;
+    const k = ev.key;
+    if (k === 'Tab') return ev.shiftKey ? 'prev' : 'next';
+    if (ev.altKey && k === 'ArrowRight') return 'next';
+    if (ev.altKey && k === 'ArrowLeft') return 'prev';
+    if (ev.shiftKey && !ev.altKey && (k === 'W' || k === 'w')) return 'close';
+    if (ev.shiftKey && !ev.altKey && (k === 'T' || k === 't')) return 'newshell';
+    if (!ev.shiftKey && !ev.altKey && k === '`') return 'dock';
+    return null;
+  }
+
   // copy: Ctrl+Shift+C, or Ctrl+C while text is selected (otherwise Ctrl+C interrupts as usual)
   term.attachCustomKeyEventHandler(ev => {
+    const app = appShortcut(ev);
+    if (app) {
+      if (ev.type === 'keydown') host.postMessage({ t: 'key', k: app });
+      ev.preventDefault();
+      return false;
+    }
     if (ev.type !== 'keydown' || !ev.ctrlKey || ev.key.toLowerCase() !== 'c') return true;
     if (!ev.shiftKey && !term.hasSelection()) return true;
     if (term.hasSelection()) { host.postMessage({ t: 'copy', d: term.getSelection() }); term.clearSelection(); }

@@ -106,6 +106,11 @@ internal sealed class ConnectionForm : Form
     public string Password => _txtPass.Text;
     /// <summary>The user the connection signs in as (its own, or the default).</summary>
     public string EffectiveUser => _txtUser.Text.Trim().Length > 0 ? _txtUser.Text.Trim() : _defaultUser;
+    /// <summary>Keep the connection in Saved connections (always, unless this is a one-off "connect now").</summary>
+    public bool SaveRequested => !_adHoc || _chkSave.Checked;
+
+    private readonly bool _adHoc;
+    private readonly ThemedCheckBox _chkSave = new() { Text = "Add to saved connections", AutoSize = true, Margin = new Padding(0, 10, 0, 0) };
 
     private readonly ComboBox _cboProtocol = new() { Width = 340, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly Label _lblPass = new() { Text = "Password", AutoSize = true, Margin = new Padding(0, 8, 0, 3) };
@@ -130,12 +135,14 @@ internal sealed class ConnectionForm : Form
     private readonly string _defaultUser;
     private readonly SavedConnection _editing;
 
-    public ConnectionForm(SavedConnection editing, string defaultUser)
+    /// <param name="adHoc">Connect now: a "Connect" button, nothing saved unless "Add to saved connections" is ticked.</param>
+    public ConnectionForm(SavedConnection editing, string defaultUser, bool adHoc = false)
     {
         _editing = editing;
+        _adHoc = adHoc;
         _defaultUser = (defaultUser ?? "").Trim();
 
-        Text = editing == null ? "Add RDP connection" : "Edit RDP connection";
+        Text = adHoc ? "Connect to a computer" : editing == null ? "Add RDP connection" : "Edit RDP connection";
         if (AppIcon.Icon != null) Icon = AppIcon.Icon;
         Font = new Font("Segoe UI", 9.5F);
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -163,7 +170,7 @@ internal sealed class ConnectionForm : Form
         UpdatePasswordHint();
         UpdateProtocol();
 
-        var save = new Button { Text = "Save", Tag = "primary", AutoSize = true, MinimumSize = new Size(96, 32), Margin = new Padding(0, 0, 8, 0) };
+        var save = new Button { Text = adHoc ? "Connect" : "Save", Tag = "primary", AutoSize = true, MinimumSize = new Size(96, 32), Margin = new Padding(0, 0, 8, 0) };
         var cancel = new Button { Text = "Cancel", AutoSize = true, MinimumSize = new Size(96, 32), Margin = new Padding(0), DialogResult = DialogResult.Cancel };
         save.Click += (_, _) => TrySave();
         AcceptButton = save;
@@ -177,20 +184,31 @@ internal sealed class ConnectionForm : Form
             FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true,
             Padding = new Padding(22, 18, 22, 18),
         };
+        var groupLabel = Field("Group");
         body.Controls.AddRange(new Control[]
         {
             Field("Connect with"), _cboProtocol,
             Field("Computer"), _txtAddress,
             Field("Name"), _txtName,
-            Field("Group"), _txtGroup,
+            groupLabel, _txtGroup,
             Field("User name"), _txtUser,
             _lblPass, _txtPass,
             _lblPassNote,
             _lblSshNote,
-            _lblError,
-            buttons,
         });
+        if (adHoc)
+        {
+            // one-off: the group only matters if it's being saved; the password is only for this connection
+            body.Controls.Add(_chkSave);
+            void ShowGroup() => groupLabel.Visible = _txtGroup.Visible = _chkSave.Checked;
+            _chkSave.CheckedChanged += (_, _) => { ShowGroup(); UpdatePassNote(); };
+            ShowGroup();
+            UpdatePassNote();
+        }
+        body.Controls.Add(_lblError);
+        body.Controls.Add(buttons);
         Controls.Add(body);
+        ActiveControl = _txtAddress;
 
         Theme.Apply(this, Theme.Current.IsDark);
     }
@@ -211,6 +229,14 @@ internal sealed class ConnectionForm : Form
     }
 
     private bool Ssh => _cboProtocol.SelectedIndex == 1;
+
+    private void UpdatePassNote()
+    {
+        if (!_adHoc) return;
+        _lblPassNote.Text = _chkSave.Checked
+            ? "A password typed here is saved in Windows Credential Manager for that user, the same as Settings > RDP credentials."
+            : "Used for this connection only. Leave blank to use a saved password for that user, or to be asked.";
+    }
 
     /// <summary>SSH doesn't take a password from here (ssh asks in the terminal), so swap the password field for a note.</summary>
     private void UpdateProtocol()

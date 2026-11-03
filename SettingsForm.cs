@@ -631,6 +631,8 @@ internal sealed class SettingsForm : Form
 
     private readonly TextBox _txtSshUser = new() { Width = 300 };
     private readonly ComboBox _cboShell = new() { Width = 300, DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly ThemedCheckBox _chkDockNew = new()
+    { Text = "Open new terminals docked", AutoSize = true, Margin = new Padding(0, 12, 0, 2) };
     private readonly TextBox _txtSshKey = new() { Width = 380 };
 
     private Control BuildSshPage()
@@ -669,6 +671,9 @@ internal sealed class SettingsForm : Form
             _settings.Save();
         };
 
+        _chkDockNew.Checked = _settings.DockNewTerminals;
+        _chkDockNew.CheckedChanged += (_, _) => { _settings.DockNewTerminals = _chkDockNew.Checked; _settings.Save(); };
+
         string ssh = Tools.Ssh;
         page.Controls.AddRange(new Control[]
         {
@@ -681,6 +686,9 @@ internal sealed class SettingsForm : Form
                   "shell, run Switchboard as administrator."),
             FieldLabel("Default shell (Ctrl+T)"),
             _cboShell,
+            _chkDockNew,
+            Muted("New shells and SSH sessions open in the docked panel under the tabs instead of in a tab of their own. " +
+                  "Move back to a tab still works on any of them."),
             Muted("Terminal font and text size are under Appearance."),
 
             Heading("SSH"),

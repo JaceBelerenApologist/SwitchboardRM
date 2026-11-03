@@ -3,6 +3,51 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.11.0 (2026-11-04)
+
+- Connect to any computer without saving it first: "Remote Desktop to a computer ..." at the top of the + menu on
+  the main tabs, and Server > Connect to a computer. Enter the computer (and optionally a user and password) and
+  connect, by Remote Desktop or SSH. Nothing is saved unless "Add to saved connections" is ticked; a password typed
+  for a one-off connection is only kept in memory for that tab.
+
+## 2.10.1 (2026-11-04)
+
+- Fixed: the + after the last tab (on the main tabs and in the docked panel) did nothing and didn't highlight.
+  Clicks in the empty part of the tab strip now reach it.
+
+## 2.10.0 (2026-11-04)
+
+- Settings > Terminal & SSH > Open new terminals docked: new shells and SSH sessions open in the docked panel
+  instead of a tab of their own. Move back to a tab still works on any of them.
+
+## 2.9.0 (2026-11-04)
+
+- Docked terminals: right-click a shell or SSH tab and choose Dock to bottom to put it in a panel under the tabs,
+  so it's visible alongside a remote desktop (which resizes to make room rather than being covered). It carries on
+  running when moved.
+- The panel is shared by every tab, has its own tab strip for several docked terminals (with a + for a new shell
+  straight into it), and a header with Move back to a tab, Hide and Close (which asks first).
+- Drag the bar between the panel and the tabs to resize it; double-click the bar for a third of the window. The
+  height is remembered.
+- Ctrl+` (or View > Docked terminals) shows and hides the panel; hidden terminals keep running. Inside a docked
+  terminal, Ctrl+Tab and Ctrl+Shift+Tab move between the docked terminals and Ctrl+Shift+W closes that one.
+
+## 2.8.1 (2026-11-02)
+
+- Fixed: Ctrl+Alt+Left / Ctrl+Alt+Right didn't switch tabs from inside a Remote Desktop session. The keys are now
+  caught by Switchboard before they reach the session (and aren't sent to the remote computer); holding them down
+  no longer races through the tabs.
+
+## 2.8.0 (2026-11-02)
+
+- Keyboard tab switching: Ctrl+Alt+Right / Ctrl+Alt+Left for the next / previous tab work everywhere, including
+  inside a Remote Desktop session; Ctrl+Tab / Ctrl+Shift+Tab do the same in the main window and terminal tabs.
+  Both wrap around at the ends.
+- Ctrl+Shift+W closes the current tab, after asking (remote sessions: disconnect; shells: anything running stops).
+  Not available from inside a Remote Desktop session; switch tabs first, or use the × or middle-click.
+- Ctrl+Shift+T opens a new shell, also from inside a terminal tab (where Ctrl+T and Ctrl+W stay with the shell).
+- View menu: Next tab, Previous tab, Close tab, with their keys.
+
 ## 2.7.0 (2026-11-02)
 
 - Local shells in tabs: Command Prompt, Windows PowerShell, and PowerShell 7, Git Bash and WSL distributions when

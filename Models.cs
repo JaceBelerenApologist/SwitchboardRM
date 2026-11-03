@@ -131,6 +131,10 @@ internal sealed class AppSettings
         _ => DarkMode,
     };
     public int ListWidth { get; set; } = 760;
+    /// <summary>Height of the docked-terminal panel under the tabs, in pixels.</summary>
+    public int DockHeight { get; set; } = 260;
+    /// <summary>Open new shells and SSH sessions in the docked panel instead of a tab.</summary>
+    public bool DockNewTerminals { get; set; }
     /// <summary>Check the AWS sign-in in the background and renew it before it runs out.</summary>
     public bool KeepSignedIn { get; set; } = true;
     /// <summary>Remove the profile's AWS keys when the app closes.</summary>

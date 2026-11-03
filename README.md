@@ -31,6 +31,7 @@ ordinary RDP and SSH connections (or imports them from RDCMan, mRemoteNG, `.rdp`
   instance ID, so the tunnel's changing local port never triggers host-key warnings.
 - Linux servers default to SSH and Windows servers to RDP; Server > Connect with SSH / Remote Desktop overrides it.
 
+- Terminals can be docked in a resizable panel under the tabs, next to a remote desktop.
 - Local shells in tabs too: Command Prompt, Windows PowerShell, PowerShell 7, Git Bash and WSL (when installed),
   with `AWS_PROFILE` and the bundled AWS tools already set up.
 
@@ -160,6 +161,11 @@ When the setup window is done, click **Sign in**.
 - **Double-click** a server to connect. Close tabs with ×, middle-click or right-click.
 - **Ctrl+T** (or the terminal button, or the + after the last tab) opens a local shell; Settings > Terminal & SSH
   sets which one.
+- **Ctrl+Alt+Right / Ctrl+Alt+Left** move to the next / previous tab from anywhere, even inside a Remote Desktop
+  session; **Ctrl+Tab / Ctrl+Shift+Tab** do the same outside Remote Desktop. **Ctrl+Shift+W** closes the current
+  tab (after asking), and **Ctrl+Shift+T** opens a shell from inside a terminal.
+- **Dock to bottom** (right-click a shell or SSH tab) puts a terminal in a panel under the tabs, beside whatever
+  tab is in front; drag the bar to resize it. **Ctrl+`** shows or hides the panel.
 - **Ctrl+1 / Ctrl+2** switch between the AWS servers and Saved tabs; **Ctrl+L** hides the server list; **F5**
   refreshes; **Ctrl+,** opens Settings.
 - In SSH tabs: select text (or Ctrl+Shift+C) to copy, Ctrl+V or right-click to paste, Enter to reconnect after a
