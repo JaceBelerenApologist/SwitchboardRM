@@ -3,6 +3,17 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.13.1 (2026-11-05)
+
+- Fixed: clicking the docked terminals' expand arrow sometimes expanded the panel and immediately collapsed it
+  again (the click reached both the arrow and the strip). Each click now acts once.
+
+## 2.13.0 (2026-11-05)
+
+- Collapsing the docked terminals now leaves their header strip at the bottom ("Docked terminals (2)") with an up
+  arrow, instead of the panel disappearing. Click the arrow or the strip (or press Ctrl+`) to expand it again; the
+  terminals keep running while collapsed. The panel only goes away completely when nothing is docked.
+
 ## 2.12.0 (2026-11-04)
 
 - Fonts folder: .ttf, .otf and .ttc files in a "fonts" folder next to SwitchboardRM.exe are loaded when Switchboard

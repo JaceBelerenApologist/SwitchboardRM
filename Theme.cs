@@ -458,6 +458,7 @@ internal static class Icons
     public const string Terminal = "\uE756"; // command prompt
     public const string Undock = "\uE8A7";   // open in a new window (back to a tab)
     public const string HideDown = "\uE70D"; // chevron down
+    public const string ShowUp = "\uE70E";   // chevron up
     public const string CloseX = "\uE711";   // ×
 
     /// <summary>A glyph drawn into a transparent square bitmap, for ToolStrip items that show an icon and text.</summary>

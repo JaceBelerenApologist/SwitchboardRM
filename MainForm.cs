@@ -114,6 +114,9 @@ internal sealed class MainForm : Form
     private readonly ToolStripButton _btnCloseDocked = new(Icons.CloseX) { Alignment = ToolStripItemAlignment.Right, ToolTipText = "Close this terminal" };
     private readonly ToolStripMenuItem _miDock = new("Docked &terminals") { ShortcutKeyDisplayString = "Ctrl+`" };
     private readonly ToolStripMenuItem _tabMenuDock = new("Dock to bottom");
+    private readonly ToolStripLabel _dockTitle = new("Docked terminals");
+    private bool _dockMinimized;   // collapsed to its header strip (the terminals keep running)
+    private DateTime _dockToggledAt = DateTime.MinValue;   // so one click can't collapse and expand at once
     private readonly ToolStripMenuItem _smAdd = new("&Add RDP connection ...");
     private readonly ToolStripMenuItem _smAdHoc = new("Connect to a &computer ...");
     private readonly Dictionary<string, string> _adHocPasswords = new();   // one-off connections: memory only
@@ -313,7 +316,7 @@ internal sealed class MainForm : Form
             miNextTab.Enabled = miPrevTab.Enabled = _tabs.TabCount > 1;
             miCloseTab.Enabled = _tabs.TabCount > 0;
             _miDock.Enabled = _dockTabs.TabCount > 0;
-            _miDock.Checked = _dockTabs.TabCount > 0 && !_dockSplit.Panel2Collapsed;
+            _miDock.Checked = _dockTabs.TabCount > 0 && !_dockSplit.Panel2Collapsed && !_dockMinimized;
         };
         view.DropDownItems.Add(new ToolStripSeparator());
         view.DropDownItems.Add(new ToolStripMenuItem("&Refresh server list", null, async (_, _) => await RefreshAsync())
@@ -467,7 +470,7 @@ internal sealed class MainForm : Form
         _dockSplit.Panel1.Controls.Add(_tabs);
         _dockSplit.Panel1.Controls.Add(_hint);
         // the docked-terminal panel: a header (title + Move to tab / Hide / Close) above its own tab strip
-        _dockBar.Items.Add(new ToolStripLabel("Docked terminals"));
+        _dockBar.Items.Add(_dockTitle);
         foreach (var b in new[] { _btnCloseDocked, _btnHideDock, _btnUndock })   // right-aligned: first added sits furthest right
         {
             b.Font = Icons.Font;
@@ -580,15 +583,24 @@ internal sealed class MainForm : Form
         };
         _dockTabs.SelectedIndexChanged += (_, _) => _sessions.FirstOrDefault(x => x.Page == _dockTabs.SelectedTab)?.Term?.FocusTerminal();
         _btnUndock.Click += (_, _) => { var d = SelectedDocked(); if (d != null) UndockSession(d); };
-        _btnHideDock.Click += (_, _) => ShowDock(false);
+        _btnHideDock.Click += (_, _) => ToggleDockFromClick(!_dockMinimized);
+        // while collapsed, a click anywhere on the strip brings the terminals back. The strip only reacts to its
+        // empty space: the arrow button and the title have their own handlers, and the same click reaching two
+        // handlers is what made the panel expand and then collapse again.
+        _dockTitle.Click += (_, _) => { if (_dockMinimized) ToggleDockFromClick(false); };
+        _dockBar.MouseClick += (_, e) =>
+        {
+            if (_dockMinimized && _dockBar.GetItemAt(e.Location) == null) ToggleDockFromClick(false);
+        };
         _btnCloseDocked.Click += (_, _) => CloseWithConfirm(SelectedDocked());
         _dockSplit.SplitterMoved += (_, _) =>
         {
-            if (!_dockSplit.Panel2Collapsed)
+            if (!_dockSplit.Panel2Collapsed && !_dockMinimized)
                 _settings.DockHeight = _dockSplit.Height - _dockSplit.SplitterDistance - _dockSplit.SplitterWidth;
         };
         _dockSplit.MouseDoubleClick += (_, _) =>   // double-click the bar: back to a third of the height
         {
+            if (_dockMinimized) { SetDockMinimized(false); return; }
             _settings.DockHeight = Math.Max(120, _dockSplit.Height / 3);
             ApplyDockHeight();
         };
@@ -1228,7 +1240,7 @@ internal sealed class MainForm : Form
         _tabs.TabPages.Add(s.Page);
         _tabs.SelectedTab = s.Page;
         UpdateMainTabsVisibility();
-        if (_dockTabs.TabCount == 0) ShowDock(false);
+        if (_dockTabs.TabCount == 0) ShowDock(false); else UpdateDockTitle();
         s.Term?.FocusTerminal();
     }
 
@@ -1243,14 +1255,68 @@ internal sealed class MainForm : Form
     private void ShowDock(bool show)
     {
         if (_dockTabs.TabCount == 0) show = false;
-        if (_dockSplit.Panel2Collapsed == !show) return;
-        _dockSplit.Panel2Collapsed = !show;
-        if (show)
+        UpdateDockTitle();
+        if (!show)
         {
-            ApplyDockHeight();
-            SelectedDocked()?.Term?.FocusTerminal();
+            // nothing left to dock: the panel goes away completely (and starts expanded next time)
+            if (_dockMinimized) SetDockMinimized(false, apply: false);
+            _dockSplit.Panel2Collapsed = true;
+            return;
         }
+        if (_dockSplit.Panel2Collapsed)
+        {
+            _dockSplit.Panel2Collapsed = false;
+            if (!_dockMinimized) ApplyDockHeight();
+        }
+        if (_dockMinimized) SetDockMinimized(false);   // something new was docked: show it
+        else SelectedDocked()?.Term?.FocusTerminal();
     }
+
+    /// <summary>
+    /// Collapse the panel to its header strip (title, count and an up arrow) or expand it back. The terminals keep
+    /// running while collapsed, and the bar can't be dragged.
+    /// </summary>
+    private void SetDockMinimized(bool minimized, bool apply = true)
+    {
+        _dockMinimized = minimized;
+        _btnHideDock.Text = minimized ? Icons.ShowUp : Icons.HideDown;
+        _btnHideDock.ToolTipText = minimized
+            ? "Show the docked terminals (Ctrl+`)"
+            : "Collapse the docked terminals to this strip (Ctrl+`). They keep running.";
+        UpdateDockTitle();
+        if (!apply) return;
+
+        _dockTabs.Visible = !minimized;
+        _dockSplit.IsSplitterFixed = minimized;
+        try
+        {
+            if (minimized)
+            {
+                int strip = _dockBar.PreferredSize.Height + 2;
+                _dockSplit.Panel2MinSize = strip;
+                _dockSplit.SplitterDistance = Math.Max(_dockSplit.Panel1MinSize, _dockSplit.Height - _dockSplit.SplitterWidth - strip);
+            }
+            else
+            {
+                _dockSplit.Panel2MinSize = 80;
+                ApplyDockHeight();
+                SelectedDocked()?.Term?.FocusTerminal();
+            }
+        }
+        catch { /* window too small right now */ }
+    }
+
+    /// <summary>A click on the dock's header: act once, ignoring a second handler for the same click.</summary>
+    private void ToggleDockFromClick(bool minimize)
+    {
+        if ((DateTime.Now - _dockToggledAt).TotalMilliseconds < 400) return;
+        _dockToggledAt = DateTime.Now;
+        SetDockMinimized(minimize);
+    }
+
+    /// <summary>"Docked terminals", plus how many while collapsed (so it's clear what the strip holds).</summary>
+    private void UpdateDockTitle() =>
+        _dockTitle.Text = _dockMinimized && _dockTabs.TabCount > 0 ? $"Docked terminals ({_dockTabs.TabCount})" : "Docked terminals";
 
     /// <summary>View > Docked terminals, Ctrl+`.</summary>
     private void ToggleDock()
@@ -1260,7 +1326,8 @@ internal sealed class MainForm : Form
             SetStatus("No docked terminals yet: right-click a terminal tab and choose Dock to bottom.");
             return;
         }
-        ShowDock(_dockSplit.Panel2Collapsed);
+        if (_dockSplit.Panel2Collapsed) ShowDock(true);
+        else SetDockMinimized(!_dockMinimized);
     }
 
     /// <summary>Put the bar where the remembered panel height says, within sensible limits.</summary>
@@ -1592,7 +1659,7 @@ internal sealed class MainForm : Form
         try { s.Page.Dispose(); } catch { }
         s.Tunnel?.Dispose(); // saved connections have no tunnel
         UpdateMainTabsVisibility();
-        if (_dockTabs.TabCount == 0) ShowDock(false);
+        if (_dockTabs.TabCount == 0) ShowDock(false); else UpdateDockTitle();
     }
 
     private void OnTabMouseUp(object sender, MouseEventArgs e)
