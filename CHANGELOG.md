@@ -3,6 +3,17 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.14.0 (2026-11-05)
+
+- Terminal colour schemes, in Settings > Appearance > Terminal colours: Match app (the default), Dracula, Campbell,
+  One Half Dark, One Half Light, Solarized Dark, Solarized Light, Nord, Gruvbox Dark and Tokyo Night. A scheme sets
+  the terminal's background, text, cursor, selection and 16 console colours, for every program; open terminals
+  change straight away. A preview shows the chosen scheme.
+- "Also colour PowerShell to match" (on by default): new PowerShell tabs start with the scheme's own colours for the
+  prompt, dir listings, tables, errors, progress and syntax, without editing your profile. It's passed in directly,
+  so execution policy doesn't block it (Windows PowerShell 5.1 gets the parts it supports), and a prompt from your
+  profile is kept.
+
 ## 2.13.1 (2026-11-05)
 
 - Fixed: clicking the docked terminals' expand arrow sometimes expanded the panel and immediately collapsed it

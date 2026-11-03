@@ -118,6 +118,10 @@ internal sealed class AppSettings
     /// <summary>Font family for SSH terminals. Empty = Cascadia Mono.</summary>
     public string TerminalFont { get; set; } = "";
     public int TerminalFontSize { get; set; } = 14;
+    /// <summary>Terminal colour scheme by name ("Dracula", "Nord" ...). Empty = match the app's light/dark look.</summary>
+    public string TerminalScheme { get; set; } = "";
+    /// <summary>Start PowerShell tabs with the scheme's own colours for the prompt, file lists and syntax.</summary>
+    public bool StylePowerShell { get; set; } = true;
     /// <summary>Shell for Ctrl+T and the toolbar's terminal button: "cmd", "powershell", "pwsh", ... Empty = automatic.</summary>
     public string DefaultShell { get; set; } = "";
 

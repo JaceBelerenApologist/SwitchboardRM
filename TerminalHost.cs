@@ -39,7 +39,9 @@ internal sealed class TerminalHost : UserControl
     public TerminalHost()
     {
         Controls.Add(_web);
-        _web.DefaultBackgroundColor = Theme.Current.IsDark ? Theme.Current.Back : Theme.Current.Surface; // no white flash
+        _web.DefaultBackgroundColor = Theme.TerminalScheme is { } scheme   // no white flash while it loads
+            ? System.Drawing.ColorTranslator.FromHtml(scheme.Background)
+            : Theme.Current.IsDark ? Theme.Current.Back : Theme.Current.Surface;
     }
 
     /// <summary>Load the terminal page. Call Run() to start a command (it waits for the page if needed).</summary>
@@ -277,6 +279,21 @@ internal sealed class TerminalHost : UserControl
     /// <summary>Terminal colours for the current look (Windows Terminal's "Campbell" / "One Half Light"), purple cursor.</summary>
     private static Dictionary<string, string> ThemeObject()
     {
+        // a chosen colour scheme (Settings > Appearance > Terminal colours) replaces the app-matched colours
+        if (Theme.TerminalScheme is { } scheme)
+        {
+            var st = new Dictionary<string, string>
+            {
+                ["background"] = scheme.Background,
+                ["foreground"] = scheme.Foreground,
+                ["cursor"] = scheme.Cursor,
+                ["cursorAccent"] = scheme.Background,
+                ["selectionBackground"] = scheme.Selection,
+            };
+            for (int i = 0; i < 16; i++) st[TerminalScheme.AnsiNames[i]] = scheme.Ansi[i];
+            return st;
+        }
+
         var p = Theme.Current;
         static string Hex(System.Drawing.Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
         var t = new Dictionary<string, string>

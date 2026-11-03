@@ -11,7 +11,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <!-- Version: bump this for each release (PATCH = fixes, MINOR = features, MAJOR = breaking changes)
          and add a section to CHANGELOG.md. Shown on Settings > About and in the .exe's Properties > Details. -->
-    <Version>2.13.1</Version>
+    <Version>2.14.0</Version>
     <Product>Switchboard Remote Manager</Product>
     <Copyright>© 2026 Nick Morrissey</Copyright>
     <Description>Switchboard Remote Manager</Description>

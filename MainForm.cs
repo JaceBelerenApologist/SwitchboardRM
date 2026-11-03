@@ -1371,6 +1371,18 @@ internal sealed class MainForm : Form
         return env;
     }
 
+    /// <summary>
+    /// The shell's command line. PowerShell gets the terminal colour scheme's own colours (prompt, file lists, syntax)
+    /// when a scheme is chosen and "Also colour PowerShell" is on: passed inline, so execution policy doesn't apply,
+    /// and run after your profile, which keeps its own prompt.
+    /// </summary>
+    private string ShellCommandLine(ShellInfo shell)
+    {
+        bool powershell = shell.Id is "pwsh" or "powershell";
+        if (!powershell || !_settings.StylePowerShell || Theme.TerminalScheme == null) return shell.CommandLine;
+        return shell.CommandLine + " -NoExit -EncodedCommand " + TerminalSchemes.EncodedStyling(Theme.TerminalScheme);
+    }
+
     /// <summary>Open a local shell in a new tab, starting in the user folder.</summary>
     private async Task OpenShellAsync(ShellInfo shell, bool docked = false)
     {
@@ -1406,7 +1418,7 @@ internal sealed class MainForm : Form
         {
             page.Text = ThemedTabControl.IconSpace + name;
             term.Reset();
-            term.Run(shell.CommandLine, home, ShellEnvironment());
+            term.Run(ShellCommandLine(shell), home, ShellEnvironment());
         };
 
         try
@@ -1424,7 +1436,7 @@ internal sealed class MainForm : Form
             MessageBox.Show(this, msg, "Could not open the terminal", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
-        term.Run(shell.CommandLine, home, ShellEnvironment());
+        term.Run(ShellCommandLine(shell), home, ShellEnvironment());
         term.FocusTerminal();
         SetStatus($"Opened {name}" + (Profile.Length > 0 ? $" (AWS_PROFILE={Profile})" : ""));
     }

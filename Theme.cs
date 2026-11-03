@@ -124,6 +124,8 @@ internal static class Theme
     public const string DefaultTerminalFont = "Cascadia Mono";
     public static string TerminalFont { get; private set; } = DefaultTerminalFont;
     public static int TerminalFontSize { get; private set; } = 14;
+    /// <summary>The terminal colour scheme, or null to match the app's look.</summary>
+    public static TerminalScheme TerminalScheme { get; private set; }
 
     /// <summary>Accent presets, in the order Settings shows them. The first is the default.</summary>
     public static readonly (string Name, Color Color)[] AccentPresets =
@@ -145,6 +147,7 @@ internal static class Theme
         UiFont = string.IsNullOrWhiteSpace(s.UiFont) ? DefaultUiFont : s.UiFont.Trim();
         TerminalFont = string.IsNullOrWhiteSpace(s.TerminalFont) ? DefaultTerminalFont : s.TerminalFont.Trim();
         TerminalFontSize = s.TerminalFontSize is >= 8 and <= 32 ? s.TerminalFontSize : 14;
+        TerminalScheme = TerminalSchemes.Find(s.TerminalScheme);
     }
 
     public static Color ResolveAccent(string setting)

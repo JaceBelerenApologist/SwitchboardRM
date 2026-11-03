@@ -64,6 +64,10 @@ internal sealed class SettingsForm : Form
     private readonly ComboBox _cboListSize = new() { Width = 90, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly ComboBox _cboTermFont = new() { Width = 260, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly ComboBox _cboTermSize = new() { Width = 90, DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly ComboBox _cboScheme = new() { Width = 260, DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly ThemedCheckBox _chkStylePs = new()
+    { Text = "Also colour PowerShell to match (prompt, file lists, syntax)", AutoSize = true, Margin = new Padding(0, 10, 0, 2) };
+    private readonly TerminalPreview _schemePreview = new() { Margin = new Padding(0, 8, 0, 4) };
     private readonly List<(AccentSwatch Swatch, string Value)> _swatches = new();
     private AccentSwatch _windowsSwatch, _customSwatch;
     private readonly Label _lblAccent = Muted("");
@@ -804,6 +808,23 @@ internal sealed class SettingsForm : Form
             _appearanceChanged();
         };
 
+        // terminal colour schemes
+        _cboScheme.Items.Add("Match app (default)");
+        foreach (var sc in TerminalSchemes.All) _cboScheme.Items.Add(sc.Name);
+        _cboScheme.SelectedIndexChanged += (_, _) =>
+        {
+            _schemePreview.Invalidate();
+            if (_loadingAppearance) return;
+            _settings.TerminalScheme = _cboScheme.SelectedIndex <= 0 ? "" : TerminalSchemes.All[_cboScheme.SelectedIndex - 1].Name;
+            _appearanceChanged();
+        };
+        _chkStylePs.CheckedChanged += (_, _) =>
+        {
+            if (_loadingAppearance) return;
+            _settings.StylePowerShell = _chkStylePs.Checked;
+            _appearanceChanged();
+        };
+
         var reset = Btn("Reset appearance");
         reset.Click += (_, _) =>
         {
@@ -814,6 +835,8 @@ internal sealed class SettingsForm : Form
             _settings.ListFontSize = 10;
             _settings.TerminalFont = "";
             _settings.TerminalFontSize = 14;
+            _settings.TerminalScheme = "";
+            _settings.StylePowerShell = true;
             _appearanceChanged();
         };
 
@@ -836,6 +859,15 @@ internal sealed class SettingsForm : Form
             FieldLabel("Server list text size"), _cboListSize,
             FieldLabel("Terminal font (SSH)"), _cboTermFont,
             FieldLabel("Terminal text size"), _cboTermSize,
+
+            Heading("Terminal colours"),
+            Muted("The colour scheme for SSH and shell tabs: background, text, and the 16 colours every console " +
+                  "program uses. Changes open terminals straight away."),
+            _cboScheme,
+            _schemePreview,
+            _chkStylePs,
+            Muted("New PowerShell tabs start with the scheme's own colours for the prompt, dir listings, tables, errors " +
+                  "and syntax, without editing your profile. A prompt from your profile is kept."),
             Muted("Lists the fonts installed on this PC, plus any in the fonts folder next to SwitchboardRM.exe " +
                   "(loaded when Switchboard starts; .ttf, .otf or .ttc)."),
 
@@ -899,6 +931,10 @@ internal sealed class SettingsForm : Form
             SelectFont(_cboTermFont, _settings.TerminalFont);
             _cboListSize.SelectedItem = (int)Math.Round(_settings.ListFontSize is >= 9f and <= 14f ? _settings.ListFontSize : 10);
             _cboTermSize.SelectedItem = _settings.TerminalFontSize is >= 10 and <= 22 ? _settings.TerminalFontSize : 14;
+            var scheme = TerminalSchemes.Find(_settings.TerminalScheme);
+            _cboScheme.SelectedIndex = scheme == null ? 0 : Array.IndexOf(TerminalSchemes.All, scheme) + 1;
+            _chkStylePs.Checked = _settings.StylePowerShell;
+            _schemePreview.Invalidate();
         }
         finally { _loadingAppearance = false; }
     }
@@ -1088,6 +1124,61 @@ internal sealed class AccentSwatch : Control
             using var font = Theme.CreateFont(Theme.UiFont, 9.5f, FontStyle.Bold);
             TextRenderer.DrawText(g, Glyph, font, inner, color,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        }
+    }
+}
+
+/// <summary>A small sample terminal in the chosen colour scheme: prompt, command, dir listing, error and the 16 colours.</summary>
+internal sealed class TerminalPreview : Control
+{
+    public TerminalPreview()
+    {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                 ControlStyles.ResizeRedraw, true);
+        Size = new Size(460, 150);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var s = Theme.TerminalScheme ?? TerminalSchemes.MatchApp();
+        Color C(string hex) => ColorTranslator.FromHtml(hex);
+        var g = e.Graphics;
+        g.Clear(Theme.Current.Back);
+
+        var box = new Rectangle(0, 0, Width - 1, Height - 1);
+        using (var bg = new SolidBrush(C(s.Background))) g.FillRectangle(bg, box);
+        using (var edge = new Pen(Theme.Current.Border)) g.DrawRectangle(edge, box);
+
+        using var font = Theme.CreateFont(Theme.TerminalFont, 9.5f);
+        using var boldFont = Theme.CreateFont(Theme.TerminalFont, 9.5f, FontStyle.Bold);
+        int lineH = font.Height + 2, x0 = 10, y = 8;
+        const TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix;
+
+        void Line(params (string Text, string Color, bool Bold)[] parts)
+        {
+            int x = x0;
+            foreach (var (text, color, bold) in parts)
+            {
+                var f = bold ? boldFont : font;
+                TextRenderer.DrawText(g, text, f, new Point(x, y), C(color), flags);
+                x += TextRenderer.MeasureText(g, text, f, Size.Empty, flags).Width;
+            }
+            y += lineH;
+        }
+
+        Line(("PS ", s.Role("PromptLabel"), false), (@"C:\Users\you", s.Role("PromptPath"), false), (" > ", s.Role("PromptArrow"), false),
+             ("Get-ChildItem", s.Role("Command"), false), (" -Path", s.Role("Parameter"), false), (" '.\\Projects'", s.Role("String"), false));
+        Line(("Mode    LastWriteTime   Name", s.Role("TableHeader"), true));
+        Line(("d----   2026-11-05      ", s.Foreground, false), ("Switchboard", s.Role("Directory"), true));
+        Line(("-a---   2026-11-04      ", s.Foreground, false), ("deploy.ps1", s.Role("Executable"), false));
+        Line(("Write-Error: ", s.Role("Error"), false), ("the server didn't answer", s.Role("Error"), false));
+
+        // the 16 ANSI colours
+        int sw = Math.Max(8, (Width - 2 * x0) / 16 - 2);
+        for (int i = 0; i < 16; i++)
+        {
+            using var b = new SolidBrush(C(s.Ansi[i]));
+            g.FillRectangle(b, x0 + i * (sw + 2), Height - sw - 10, sw, sw);
         }
     }
 }

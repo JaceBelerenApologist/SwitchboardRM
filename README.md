@@ -62,6 +62,8 @@ ordinary RDP and SSH connections (or imports them from RDCMan, mRemoteNG, `.rdp`
 - RDP passwords saved in Windows Credential Manager (never in files).
 - Customisable look: light, dark or match Windows; any accent colour (presets, the Windows accent or a custom
   colour); app font, server list text size, and terminal font and size.
+- Terminal colour schemes (Dracula, Nord, Solarized, One Half, Gruvbox, Tokyo Night, Campbell), which also colour
+  PowerShell's prompt, file lists and syntax to match, without touching your profile.
 - Extra fonts without installing them: put `.ttf` / `.otf` files in a `fonts` folder next to `SwitchboardRM.exe`
   (in the project: `fonts\`, copied on publish). They're offered in Settings > Appearance for the app and terminals.
 - Splash screen, settings window, About page with bundled tool versions.
