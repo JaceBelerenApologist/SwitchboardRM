@@ -90,7 +90,22 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #1c1c21; }
       if (m.font) { term.options.fontFamily = m.font.family; term.options.fontSize = m.font.size; refit(); }
     }
     else if (m.t === 'focus') term.focus();
+    else if (m.t === 'fonts') loadFonts(m.fonts);
   });
+
+  // fonts from Switchboard's fonts folder: the files arrive base64-encoded; once loaded, the terminal re-measures
+  function loadFonts(list) {
+    const toBuffer = b64 => { const s = atob(b64), a = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a.buffer; };
+    Promise.all(list.map(f =>
+      new FontFace(f.family, toBuffer(f.data), { weight: String(f.weight), style: f.italic ? 'italic' : 'normal' })
+        .load().then(face => document.fonts.add(face)).catch(() => { })))
+      .then(() => {
+        const family = term.options.fontFamily;
+        term.options.fontFamily = 'monospace';   // a real change, so the character size is measured again
+        term.options.fontFamily = family;
+        refit();
+      });
+  }
 
   refit();
   host.postMessage({ t: 'ready', cols: term.cols, rows: term.rows });

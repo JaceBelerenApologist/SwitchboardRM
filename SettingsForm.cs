@@ -836,7 +836,8 @@ internal sealed class SettingsForm : Form
             FieldLabel("Server list text size"), _cboListSize,
             FieldLabel("Terminal font (SSH)"), _cboTermFont,
             FieldLabel("Terminal text size"), _cboTermSize,
-            Muted("Only fonts installed on this PC are listed."),
+            Muted("Lists the fonts installed on this PC, plus any in the fonts folder next to SwitchboardRM.exe " +
+                  "(loaded when Switchboard starts; .ttf, .otf or .ttc)."),
 
             ButtonRow(reset),
         });
@@ -845,9 +846,9 @@ internal sealed class SettingsForm : Form
     }
 
     /// <summary>A font in a font list: the family, shown as "Name (default)" for the default.</summary>
-    private sealed record FontChoice(string Family, bool IsDefault)
+    private sealed record FontChoice(string Family, bool IsDefault, bool FromFolder = false)
     {
-        public override string ToString() => IsDefault ? Family + " (default)" : Family;
+        public override string ToString() => IsDefault ? Family + " (default)" : FromFolder ? Family + "  (fonts folder)" : Family;
     }
 
     private static void FillFonts(ComboBox combo, string defaultFamily, HashSet<string> installed, string[] candidates)
@@ -856,6 +857,10 @@ internal sealed class SettingsForm : Form
         foreach (var f in candidates)
             if (!f.Equals(defaultFamily, StringComparison.OrdinalIgnoreCase) && installed.Contains(f))
                 combo.Items.Add(new FontChoice(f, false));
+        // everything in the fonts folder, whatever it is
+        foreach (var f in FontLoader.Families)
+            if (!combo.Items.Cast<FontChoice>().Any(x => x.Family.Equals(f, StringComparison.OrdinalIgnoreCase)))
+                combo.Items.Add(new FontChoice(f, false, FromFolder: true));
     }
 
     private void SetAccent(string value)
@@ -1080,7 +1085,7 @@ internal sealed class AccentSwatch : Control
         if (!string.IsNullOrEmpty(Glyph))
         {
             var color = Swatch.IsEmpty ? p.Text : ColorMath.TextOn(Swatch);
-            using var font = new Font(Theme.UiFont, 9.5f, FontStyle.Bold);
+            using var font = Theme.CreateFont(Theme.UiFont, 9.5f, FontStyle.Bold);
             TextRenderer.DrawText(g, Glyph, font, inner, color,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }

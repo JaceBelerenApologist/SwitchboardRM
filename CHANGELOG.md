@@ -3,6 +3,14 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.12.0 (2026-11-04)
+
+- Fonts folder: .ttf, .otf and .ttc files in a "fonts" folder next to SwitchboardRM.exe are loaded when Switchboard
+  starts, for Switchboard only (nothing is installed in Windows). They appear in Settings > Appearance as
+  "(fonts folder)" and can be the app font or the terminal font; terminals are given the font files directly.
+  Weights come from the file names (Regular, Bold, SemiBold, Italic ...). Publishing copies the project's fonts\
+  folder into output\fonts\.
+
 ## 2.11.0 (2026-11-04)
 
 - Connect to any computer without saving it first: "Remote Desktop to a computer ..." at the top of the + menu on

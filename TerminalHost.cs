@@ -29,6 +29,7 @@ internal sealed class TerminalHost : UserControl
     private string _pendingCommand;
     private int _cols = 120, _rows = 30;
     private bool _ready;
+    private string _fontsSent;   // the fonts-folder family already given to this page
     private bool _ended;
     private readonly StringBuilder _buffer = new();   // output that arrived before the page was ready
     private readonly object _gate = new();
@@ -98,6 +99,7 @@ internal sealed class TerminalHost : UserControl
     public void ApplyTheme()
     {
         if (_web.CoreWebView2 == null) return;
+        SendFolderFonts();   // a fonts-folder font chosen as the terminal font: give the page its files first
         try
         {
             _web.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new
@@ -137,6 +139,7 @@ internal sealed class TerminalHost : UserControl
                     {
                         if (_buffer.Length > 0) { _web.CoreWebView2.PostWebMessageAsString(_buffer.ToString()); _buffer.Clear(); }
                     }
+                    SendFolderFonts();
                     if (_pendingCommand != null) { var c = _pendingCommand; _pendingCommand = null; RunCommand(c); }
                     break;
 
@@ -231,6 +234,31 @@ internal sealed class TerminalHost : UserControl
             .Replace("/*THEME*/", JsonSerializer.Serialize(ThemeObject()))
             .Replace("/*FONT_FAMILY*/", JsonSerializer.Serialize(FontStack()))
             .Replace("/*FONT_SIZE*/", Theme.TerminalFontSize.ToString());
+    }
+
+    /// <summary>
+    /// If the terminal font comes from the fonts folder, hand its files to the page: the browser can't see fonts
+    /// loaded only for this app. Sent once per family per terminal.
+    /// </summary>
+    private void SendFolderFonts()
+    {
+        string family = Theme.TerminalFont;
+        if (!_ready || _web.CoreWebView2 == null || family == _fontsSent) return;
+        var files = FontLoader.FilesOf(family);
+        if (files.Count == 0) return;
+        try
+        {
+            var payload = files.Select(f => new
+            {
+                family = f.Family,
+                weight = f.Weight,
+                italic = f.Italic,
+                data = Convert.ToBase64String(File.ReadAllBytes(f.Path)),
+            }).ToList();
+            _web.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new { t = "fonts", fonts = payload }));
+            _fontsSent = family;
+        }
+        catch (Exception ex) { Log.Write($"Couldn't give the terminal the font {family}: {ex.Message}"); }
     }
 
     /// <summary>The chosen terminal font, with sensible monospace fonts behind it in case it's missing.</summary>

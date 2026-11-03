@@ -11,7 +11,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <!-- Version: bump this for each release (PATCH = fixes, MINOR = features, MAJOR = breaking changes)
          and add a section to CHANGELOG.md. Shown on Settings > About and in the .exe's Properties > Details. -->
-    <Version>2.11.0</Version>
+    <Version>2.12.0</Version>
     <Product>Switchboard Remote Manager</Product>
     <Copyright>© 2026 Nick Morrissey</Copyright>
     <Description>Switchboard Remote Manager</Description>
@@ -64,7 +64,7 @@
   <!-- The helpers live in the project's tools\ folder (collect-tools.ps1 fills it) and are used from there while
        developing. Keep them, and the output\ folder, out of the build and the Solution Explorer view. -->
   <PropertyGroup>
-    <DefaultItemExcludes>$(DefaultItemExcludes);tools\**;output\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);tools\**;output\**;fonts\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <!-- Before publishing: clear old files from output\ (tools\ is handled below, so it isn't recopied every time). -->
@@ -80,6 +80,11 @@
   <Target Name="MirrorTools" AfterTargets="Publish" Condition="Exists('$(MSBuildProjectDirectory)\tools')">
     <Exec Command="robocopy &quot;$(MSBuildProjectDirectory)\tools&quot; &quot;$(PublishDir)tools&quot; /MIR /NFL /NDL /NJH /NJS /NP /R:1 /W:1 &amp; if errorlevel 8 (exit 1) else (exit 0)" />
     <Message Importance="high" Text="Bundled tools mirrored into $(PublishDir)tools" />
+  </Target>
+  <!-- fonts\ (optional): copied next to the .exe the same way; Switchboard loads them at start-up -->
+  <Target Name="MirrorFonts" AfterTargets="Publish" Condition="Exists('$(MSBuildProjectDirectory)\fonts')">
+    <Exec Command="robocopy &quot;$(MSBuildProjectDirectory)\fonts&quot; &quot;$(PublishDir)fonts&quot; /MIR /NFL /NDL /NJH /NJS /NP /R:1 /W:1 &amp; if errorlevel 8 (exit 1) else (exit 0)" />
+    <Message Importance="high" Text="Fonts mirrored into $(PublishDir)fonts" />
   </Target>
   <Target Name="WarnNoTools" AfterTargets="Publish" Condition="!Exists('$(MSBuildProjectDirectory)\tools')">
     <Warning Text="No tools\ folder: output\ has no bundled helpers. Run collect-tools.ps1 first if you want them." />

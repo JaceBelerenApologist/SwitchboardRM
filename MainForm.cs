@@ -230,7 +230,7 @@ internal sealed class MainForm : Form
         // server list text size (Settings > Appearance), in the app font
         float listSize = _settings.ListFontSize is >= 8f and <= 18f ? _settings.ListFontSize : 10;
         if (_list.Font.Size != listSize || _list.Font.FontFamily.Name != Theme.UiFont)
-            _list.Font = new Font(Theme.UiFont, listSize);
+            _list.Font = Theme.CreateFont(Theme.UiFont, listSize);
         _hint.ForeColor = Theme.Current.Muted;
         RenderActionIcons();
         foreach (var s in _sessions) s.Term?.ApplyTheme();

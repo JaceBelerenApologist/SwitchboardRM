@@ -20,6 +20,7 @@ internal static class Program
         };
 
         Migration.Run(); // 1.x (AWS RDP Launcher) -> 2.0 settings and passwords, once
+        FontLoader.LoadAll(); // fonts\ next to the .exe, for this app only
 
         // SSH terminals: tell remote programs they're on an xterm-compatible, 256-colour terminal
         Environment.SetEnvironmentVariable("TERM", "xterm-256color");

@@ -198,7 +198,23 @@ internal static class Theme
         var style = original.Style;
         if (family.Contains("Semibold", StringComparison.OrdinalIgnoreCase) || family.Contains("Bold", StringComparison.OrdinalIgnoreCase))
             style |= FontStyle.Bold; // other families have no separate "Semibold": use bold
-        return new Font(UiFont, original.Size, style, original.Unit);
+        return CreateFont(UiFont, original.Size, style, original.Unit);
+    }
+
+    /// <summary>
+    /// A font by family name: from the fonts folder (FontLoader) if it's there, else an installed font. If the
+    /// family has no such style (e.g. no bold file in the folder), its regular style is used instead.
+    /// </summary>
+    public static Font CreateFont(string family, float size, FontStyle style = FontStyle.Regular, GraphicsUnit unit = GraphicsUnit.Point)
+    {
+        if (FontLoader.TryGetFamily(family, out var loaded))
+        {
+            if (!loaded.IsStyleAvailable(style))
+                style = loaded.IsStyleAvailable(FontStyle.Regular) ? FontStyle.Regular
+                      : loaded.IsStyleAvailable(FontStyle.Bold) ? FontStyle.Bold : FontStyle.Italic;
+            return new Font(loaded, size, style, unit);
+        }
+        return new Font(family, size, style, unit);
     }
 
     /// <summary>Apply the app font to a control created after the theme was applied.</summary>
