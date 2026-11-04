@@ -224,6 +224,13 @@ internal sealed class MainForm : Form
     {
         base.OnHandleCreated(e);
         Theme.ApplyTitleBar(this);
+        TaskbarIcon.Apply(this);
+    }
+
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        TaskbarIcon.Apply(this);   // icon sizes follow the display scaling
     }
 
     private void ApplyTheme()
@@ -1870,6 +1877,7 @@ internal sealed class MainForm : Form
         SystemEvents.SessionSwitch += OnSessionSwitch;
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged; // "Match Windows" theme / Windows accent
+        SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged; // monitors changed: re-send the taskbar icon
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)
@@ -1878,6 +1886,7 @@ internal sealed class MainForm : Form
         SystemEvents.SessionSwitch -= OnSessionSwitch;
         if (_rdpKeys != null) Application.RemoveMessageFilter(_rdpKeys);
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+        SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         base.OnFormClosed(e);
     }
@@ -1924,8 +1933,11 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>Unlocked or awake: carry on, with the next sign-in check about 30-60 seconds later (network first).</summary>
+    private void OnDisplaySettingsChanged(object sender, EventArgs e) => OnUiThread(() => TaskbarIcon.Apply(this));
+
     private void ResumeBackgroundSignIn(string why)
     {
+        TaskbarIcon.Apply(this);   // unlocked / awake: the taskbar asks for icons again, and may have missed ours
         if (!_paused) return;
         _paused = false;
         Log.Write($"Background sign-in resumed: {why}");

@@ -3,6 +3,12 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.14.1 (2026-11-05)
+
+- Fixed: the taskbar sometimes showed the generic app icon instead of Switchboard's, especially after unlocking the
+  PC. The icon is now also set as the window class's icon (what the taskbar falls back to when the app is busy),
+  and re-sent after unlocking, waking, display changes and display-scaling changes.
+
 ## 2.14.0 (2026-11-05)
 
 - Terminal colour schemes, in Settings > Appearance > Terminal colours: Match app (the default), Dracula, Campbell,
