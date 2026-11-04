@@ -3,6 +3,12 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.14.2 (2026-11-05)
+
+- Fixed: after sleep or unlocking, parts of the window sometimes stayed blank until hovered. Switchboard now redraws
+  all its windows (and their title bars) itself after waking, unlocking or a display change, and again a few
+  seconds later once the display has settled.
+
 ## 2.14.1 (2026-11-05)
 
 - Fixed: the taskbar sometimes showed the generic app icon instead of Switchboard's, especially after unlocking the

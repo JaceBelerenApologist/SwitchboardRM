@@ -1933,11 +1933,54 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>Unlocked or awake: carry on, with the next sign-in check about 30-60 seconds later (network first).</summary>
-    private void OnDisplaySettingsChanged(object sender, EventArgs e) => OnUiThread(() => TaskbarIcon.Apply(this));
+    private void OnDisplaySettingsChanged(object sender, EventArgs e) => OnUiThread(() =>
+    {
+        TaskbarIcon.Apply(this);
+        RedrawAfterWake();
+    });
+
+    /// <summary>
+    /// After sleep, unlock or a display change, Windows doesn't always ask every part of the window to repaint
+    /// (particularly next to the GPU-drawn remote desktop and terminals), so some controls stayed blank until
+    /// hovered. Force a full redraw of every Switchboard window now and again a little later, once the display has
+    /// settled, and put the themed title bars back.
+    /// </summary>
+    private void RedrawAfterWake()
+    {
+        RedrawAllWindows();
+        foreach (int delay in new[] { 1000, 3000 })
+        {
+            var t = new System.Windows.Forms.Timer { Interval = delay };
+            t.Tick += (_, _) => { t.Stop(); t.Dispose(); RedrawAllWindows(); };
+            t.Start();
+        }
+    }
+
+    private static void RedrawAllWindows()
+    {
+        foreach (Form f in Application.OpenForms)
+        {
+            if (f.IsDisposed || !f.IsHandleCreated || !f.Visible) continue;
+            try
+            {
+                Theme.ApplyTitleBar(f);
+                RedrawWindow(f.Handle, IntPtr.Zero, IntPtr.Zero,
+                    RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW);
+            }
+            catch { /* a window closing as we go */ }
+        }
+    }
+
+    private const uint RDW_INVALIDATE = 0x0001, RDW_ERASE = 0x0004, RDW_FRAME = 0x0400,
+                       RDW_ALLCHILDREN = 0x0080, RDW_UPDATENOW = 0x0100;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool RedrawWindow(IntPtr hWnd, IntPtr rcUpdate, IntPtr hrgnUpdate, uint flags);
 
     private void ResumeBackgroundSignIn(string why)
     {
         TaskbarIcon.Apply(this);   // unlocked / awake: the taskbar asks for icons again, and may have missed ours
+        RedrawAfterWake();         // and parts of the window may not have been repainted
         if (!_paused) return;
         _paused = false;
         Log.Write($"Background sign-in resumed: {why}");
