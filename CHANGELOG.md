@@ -3,6 +3,14 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.15.0 (2026-11-05)
+
+- Nothing outlives Switchboard: every tunnel, ssh, shell and sign-in helper it starts is tied to it (a Windows job
+  object), so they all end when Switchboard does, including when it crashes or is killed from Task Manager. AWS
+  sessions behind those tunnels no longer stay open until Session Manager's idle timeout.
+- Clean-up after a crash: if the last run didn't close cleanly, Switchboard removes the AWS keys it left behind when
+  it next starts (with "Sign out of AWS when Switchboard closes" on), before anything else.
+
 ## 2.14.2 (2026-11-05)
 
 - Fixed: after sleep or unlocking, parts of the window sometimes stayed blank until hovered. Switchboard now redraws

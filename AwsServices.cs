@@ -622,7 +622,7 @@ internal sealed class Tunnel : IDisposable
         p.OutputDataReceived += (_, e) => t.Append(e.Data);
         p.ErrorDataReceived += (_, e) => t.Append(e.Data);
 
-        try { p.Start(); }
+        try { p.Start(); ProcessJob.Add(p); }   // ends with Switchboard, even if it crashes
         catch (Exception ex)
         {
             t.Dispose();

@@ -24,7 +24,9 @@ internal static class Program
 
         // SSH terminals: tell remote programs they're on an xterm-compatible, 256-colour terminal
         Environment.SetEnvironmentVariable("TERM", "xterm-256color");
-        Application.Run(new StartupContext());
+        bool lastRunCrashed = RunMarker.Begin();
+        Application.Run(new StartupContext(lastRunCrashed));
+        RunMarker.End();   // only reached on a clean exit
     }
 }
 
@@ -34,8 +36,11 @@ internal sealed class StartupContext : ApplicationContext
     private readonly SplashForm _splash;
     private readonly MainForm _main;
 
-    public StartupContext()
+    private readonly bool _lastRunCrashed;
+
+    public StartupContext(bool lastRunCrashed)
     {
+        _lastRunCrashed = lastRunCrashed;
         var look = AppSettings.PeekAppearance();
         Theme.Configure(new AppSettings { AccentColor = look.Accent }); // the splash in the chosen accent colour
         _splash = new SplashForm(look.Dark);
@@ -52,6 +57,7 @@ internal sealed class StartupContext : ApplicationContext
     private async Task StartAsync()
     {
         var result = StartupResult.Ready;
+        if (_lastRunCrashed) await CleanUpAfterCrashAsync();
         try
         {
             result = await _main.PrepareAsync(_splash.SetStatus);
@@ -69,5 +75,25 @@ internal sealed class StartupContext : ApplicationContext
         // "Keep me signed in" off: don't open the sign-in by ourselves; connecting to an AWS server will
         if (_main.KeepSignedIn) await _main.SignInAsync();
         else _main.ShowSignedOutNotice();
+    }
+
+    /// <summary>
+    /// The last run didn't close cleanly, so its sign-out on close never happened: remove the AWS keys it left behind
+    /// (when "Sign out of AWS when Switchboard closes" is on). Its tunnels and shells already ended with it.
+    /// </summary>
+    private async Task CleanUpAfterCrashAsync()
+    {
+        try
+        {
+            var settings = AppSettings.Load();
+            if (!settings.SignOutOnClose || string.IsNullOrWhiteSpace(settings.Profile))
+            {
+                Log.Write("The last run didn't close cleanly (sign-out on close is off, so nothing to clean up)");
+                return;
+            }
+            _splash.SetStatus("Cleaning up after the last session ...");
+            Log.Write("The last run didn't close cleanly: " + await Aws.SignOutAsync(settings.Profile));
+        }
+        catch (Exception ex) { Log.Write("Clean-up after the last run failed: " + ex.Message); }
     }
 }

@@ -65,13 +65,17 @@ internal sealed class PseudoConsole : IDisposable
             IntPtr envBlock = environment == null ? IntPtr.Zero : Marshal.StringToHGlobalUni(EnvironmentBlock(environment));
             try
             {
-                uint flags = EXTENDED_STARTUPINFO_PRESENT | (envBlock != IntPtr.Zero ? CREATE_UNICODE_ENVIRONMENT : 0);
+                // started suspended so it joins the job before it can start anything of its own
+                uint flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED |
+                             (envBlock != IntPtr.Zero ? CREATE_UNICODE_ENVIRONMENT : 0);
                 string cwd = !string.IsNullOrEmpty(workingDirectory) && Directory.Exists(workingDirectory) ? workingDirectory : null;
                 // CreateProcessW may write into the command-line buffer, so it gets its own copy
                 if (!CreateProcess(null, new StringBuilder(commandLine), IntPtr.Zero, IntPtr.Zero, false, flags,
                         envBlock, cwd, ref si, out var pi))
                     throw new Win32Exception(Marshal.GetLastWin32Error(), "Couldn't start: " + commandLine);
                 _process = pi.hProcess;
+                ProcessJob.Add(pi.hProcess);   // ends with Switchboard, even if it crashes
+                ResumeThread(pi.hThread);
                 _thread = pi.hThread;
             }
             finally
@@ -177,6 +181,10 @@ internal sealed class PseudoConsole : IDisposable
 
     private const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
     private const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
+    private const uint CREATE_SUSPENDED = 0x00000004;
+
+    [DllImport("kernel32.dll")]
+    private static extern uint ResumeThread(IntPtr thread);
     private const int PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016;
     private const uint INFINITE = 0xFFFFFFFF;
 

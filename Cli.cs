@@ -25,7 +25,7 @@ internal static class Cli
         if (env != null) foreach (var kv in env) psi.Environment[kv.Key] = kv.Value;
 
         using var p = new Process { StartInfo = psi };
-        try { p.Start(); }
+        try { p.Start(); ProcessJob.Add(p); }   // ends with Switchboard, even if it crashes
         catch (Exception ex) { return (-1, "", ex.Message); }
 
         var outTask = p.StandardOutput.ReadToEndAsync();
