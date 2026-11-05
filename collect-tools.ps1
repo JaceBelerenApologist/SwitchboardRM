@@ -129,6 +129,13 @@ foreach ($p in $sorted) {
 }
 Set-Content -Path (Join-Path $aalDir 'THIRD-PARTY-NOTICES.txt') -Encoding UTF8 -Value $out.ToString()
 $noText = @($sorted | Where-Object { -not $_.Text }).Count
+# Puppeteer's own Chromium, if it came along, must be complete: a folder without chrome.exe breaks sign-in
+$localChromium = Join-Path $aalDir 'node_modules\puppeteer\.local-chromium'
+if ((Test-Path $localChromium) -and -not (Get-ChildItem $localChromium -Recurse -Filter chrome.exe -ErrorAction SilentlyContinue)) {
+    Write-Warning ("Puppeteer's Chromium in aws-azure-login is incomplete (chrome.exe is missing; an interrupted download, " +
+                   "or security software removed it). Switchboard will use tools\chromium or Microsoft Edge for sign-in instead. " +
+                   "To repair it: npm install -g aws-azure-login, then run this again.")
+}
 Add-Summary 'aws-azure-login' $aalVersion 'MIT (packages: see its notices)' 'https://github.com/aws-azure-login/aws-azure-login' 'aws-azure-login\' 'LICENSE, THIRD-PARTY-NOTICES.txt'
 Write-Host "aws-azure-login $aalVersion ($($sorted.Count) packages)  ->  tools\aws-azure-login"
 if ($noText -gt 0) { Write-Host "  $noText package(s) have no licence file of their own; the notices name their licence and npm page." }

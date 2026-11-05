@@ -177,9 +177,10 @@ internal sealed class MainForm : Form
         new("Name", "Name", 200), new("Type", "Type", 95), new("Os", "OS", 150), new("Region", "Region", 90),
         new("Ip", "IP address", 110), new("Id", "Instance ID", 150), new("Status", "Status", 110),
         new("User", "Sign in as", 170), new("Group", "Group", 150),
+        new("Description", "Description", 220),
     };
     private static readonly string[] AwsColumnKeys = { "Name", "Type", "Os", "Region", "Ip", "Id", "Status" };
-    private static readonly string[] SavedColumnKeys = { "Name", "Group", "Ip", "User", "Status" };
+    private static readonly string[] SavedColumnKeys = { "Name", "Group", "Description", "Ip", "User", "Status" };
 
     // ---- the list's two tabs: AWS servers / saved RDP connections
     private bool _savedView;
@@ -398,6 +399,15 @@ internal sealed class MainForm : Form
         _list.AllowColumnReorder = true; // drag headers; Name is kept first (see ColumnReordered)
         _list.Font = new Font("Segoe UI", 10F);
         _savedView = _settings.SavedView;
+        if (!_settings.DescriptionColumnAdded)
+        {
+            if (_settings.SavedColumns.Count > 0 && !_settings.SavedColumns.Contains("Description"))
+            {
+                int at = _settings.SavedColumns.IndexOf("Group");
+                _settings.SavedColumns.Insert(at >= 0 ? at + 1 : _settings.SavedColumns.Count, "Description");
+            }
+            _settings.DescriptionColumnAdded = true;
+        }
         _columns = ValidColumns(_savedView ? _settings.SavedColumns : _settings.Columns, ViewColumnKeys);
         RebuildColumns();
         _tabAws.Checked = !_savedView;
@@ -788,7 +798,7 @@ internal sealed class MainForm : Form
                (_savedView || !_chkWin.Checked || i.Platform == "Windows") &&
                (!_chkOffline.Checked || i.Online || _actions.ContainsKey(i.Id)) && // keep servers we're starting in view
                (q.Length == 0 ||
-                $"{i.Name} {i.Type} {i.Os} {i.Id} {i.Ip} {i.Region} {StatusOf(i)} {i.Tags} {i.Saved?.Group}".Contains(q, StringComparison.OrdinalIgnoreCase));
+                $"{i.Name} {i.Type} {i.Os} {i.Id} {i.Ip} {i.Region} {StatusOf(i)} {i.Tags} {i.Saved?.Group} {i.Saved?.Description}".Contains(q, StringComparison.OrdinalIgnoreCase));
     }
 
     private void RebuildList()
@@ -805,6 +815,7 @@ internal sealed class MainForm : Form
             "Status" => i => StatusOf(i),
             "User" => i => CellText(i, "User"),
             "Group" => i => (i.Saved?.Group ?? "") + "\u0001" + i.Name.ToLowerInvariant(), // by group, then name
+            "Description" => i => i.Saved?.Description ?? "",
             _ => i => i.Name.ToLowerInvariant(),
         };
         _list.SortColumn = _columns.IndexOf(_sortProp); // -1 (no arrow) if that column is hidden
@@ -2268,6 +2279,8 @@ internal sealed class MainForm : Form
         "Id" => i.IsSaved ? "" : i.Id,
         "Status" => StatusOf(i),
         "Group" => i.Saved?.Group ?? "",
+        // one line in the list (the full text, line breaks included, is in the tooltip)
+        "Description" => (i.Saved?.Description ?? "").Replace("\r\n", " ").Replace('\n', ' '),
         "User" => i.Saved is { User.Length: > 0 } c ? c.User
                 : i.Saved is { IsSsh: true } ? "your Windows user name"
                 : (_settings.Username ?? "").Length > 0 ? _settings.Username + " (default)" : "asked when connecting",
@@ -2671,7 +2684,8 @@ internal sealed class MainForm : Form
 
     private string Tooltip(Instance i) => i.IsSaved
         ? $"{i.Name}\nSaved {(i.Saved.IsSsh ? "SSH" : "RDP")} connection to {i.Saved.Address}\nStatus: {StatusOf(i)}\n" +
-          $"Signs in as: {CellText(i, "User")}"
+          $"Signs in as: {CellText(i, "User")}" +
+          (string.IsNullOrWhiteSpace(i.Saved.Description) ? "" : "\n\n" + i.Saved.Description)
         : 
         $"{i.Name}\n{i.Type}  {i.OsFull}\nStatus: {StatusOf(i)}" +
         $"\nEC2 state: {(i.State.Length > 0 ? i.State : "n/a")}   Systems Manager: {(i.Managed ? i.Ping : "not managed")}" +

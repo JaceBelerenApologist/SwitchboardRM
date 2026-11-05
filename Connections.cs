@@ -21,6 +21,8 @@ internal sealed class SavedConnection
     public string User { get; set; } = "";
     /// <summary>Optional folder-like grouping, e.g. "Datacenter / SQL" (imports bring theirs along).</summary>
     public string Group { get; set; } = "";
+    /// <summary>Optional free text: what the machine is, who owns it, notes ...</summary>
+    public string Description { get; set; } = "";
 
     public bool IsSsh => string.Equals(Protocol, "SSH", StringComparison.OrdinalIgnoreCase);
     public int DefaultPort => IsSsh ? 22 : 3389;
@@ -128,6 +130,11 @@ internal sealed class ConnectionForm : Form
     };
     private readonly TextBox _txtName = new() { Width = 340 };
     private readonly TextBox _txtGroup = new() { Width = 340, PlaceholderText = "Optional, e.g. Datacenter / SQL" };
+    private readonly TextBox _txtDescription = new()
+    {
+        Width = 340, Height = 48, Multiline = true, ScrollBars = ScrollBars.Vertical, AcceptsReturn = false,
+        PlaceholderText = "Optional, e.g. what it is or who owns it",
+    };
     private readonly TextBox _txtAddress = new() { Width = 340 };
     private readonly TextBox _txtUser = new() { Width = 340 };
     private readonly TextBox _txtPass = new() { Width = 340, UseSystemPasswordChar = true };
@@ -166,6 +173,7 @@ internal sealed class ConnectionForm : Form
             _txtAddress.Text = editing.Address;
             _txtUser.Text = editing.User;
             _txtGroup.Text = editing.Group;
+            _txtDescription.Text = editing.Description ?? "";
         }
         UpdatePasswordHint();
         UpdateProtocol();
@@ -191,6 +199,7 @@ internal sealed class ConnectionForm : Form
             Field("Computer"), _txtAddress,
             Field("Name"), _txtName,
             groupLabel, _txtGroup,
+            Field("Description"), _txtDescription,
             Field("User name"), _txtUser,
             _lblPass, _txtPass,
             _lblPassNote,
@@ -275,6 +284,7 @@ internal sealed class ConnectionForm : Form
             Port = port,
             User = _txtUser.Text.Trim(),
             Group = _txtGroup.Text.Trim(),
+            Description = _txtDescription.Text.Trim(),
         };
         DialogResult = DialogResult.OK;
         Close();

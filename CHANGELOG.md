@@ -3,6 +3,25 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.17.2 (2026-11-06)
+
+- Fixed: when Puppeteer's own Chromium was missing or incomplete, sign-in still failed ("Failed to launch the browser
+  process"). The fallback browser (tools\chromium or Microsoft Edge) was passed in a setting aws-azure-login never
+  reads; it's now passed as PUPPETEER_EXECUTABLE_PATH, which Puppeteer uses. The same check now covers an installed
+  (not bundled) aws-azure-login. The log says which browser sign-in uses when it isn't Puppeteer's own.
+
+## 2.17.1 (2026-11-06)
+
+- Fixed: sign-in failed with "Failed to launch the browser process" when Puppeteer's Chromium in the tools folder was
+  incomplete (its folder there, but no chrome.exe). Switchboard now checks for chrome.exe itself and otherwise uses
+  tools\chromium or Microsoft Edge. collect-tools.ps1 warns when it collects an incomplete Chromium.
+
+## 2.17.0 (2026-11-06)
+
+- Saved connections have a Description: a field in the Add/Edit and Connect dialogs, and a Description column on the
+  Saved tab (sortable, searched, shown in full in the row's tooltip). It's added to an existing column layout once.
+- Imports bring descriptions along where the other tool has them: RDCMan's comment and mRemoteNG's description.
+
 ## 2.16.0 (2026-11-06)
 
 - Update the helper tools from inside Switchboard: Help > Check for tool updates (report only) and Help > Update

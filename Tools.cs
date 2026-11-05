@@ -70,23 +70,24 @@ internal static class Tools
             if (shim != null) { a.Add("--require"); a.Add(shim); }
             a.Add(BundledAzureLogin);
             a.AddRange(args);
-            var env = BrowserEnv() ?? new Dictionary<string, string>();
+            var env = BrowserEnv(Path.Combine(Dir, "aws-azure-login")) ?? new Dictionary<string, string>();
             if (shim != null) env["SWITCHBOARD_LOGIN_HINT"] = loginHint.Trim();
             return (BundledNode, a, env);
         }
 
         var c = new List<string> { "/c", "aws-azure-login" };
         c.AddRange(args);
-        Dictionary<string, string> installedEnv = null;
+        // an installed aws-azure-login lives in npm's global folder: same check on its Chromium
+        string installedPackage = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                                               "npm", "node_modules", "aws-azure-login");
+        var installedEnv = BrowserEnv(installedPackage);
         if (shim != null)
         {
             // an installed aws-azure-login is started by npm's wrapper, so the shim goes in through NODE_OPTIONS
             // (forward slashes: NODE_OPTIONS treats backslashes as escapes)
-            installedEnv = new Dictionary<string, string>
-            {
-                ["NODE_OPTIONS"] = $"--require \"{shim.Replace('\\', '/')}\"",
-                ["SWITCHBOARD_LOGIN_HINT"] = loginHint.Trim(),
-            };
+            installedEnv ??= new Dictionary<string, string>();
+            installedEnv["NODE_OPTIONS"] = $"--require \"{shim.Replace('\\', '/')}\"";
+            installedEnv["SWITCHBOARD_LOGIN_HINT"] = loginHint.Trim();
         }
         return ("cmd.exe", c, installedEnv);
     }
@@ -116,13 +117,27 @@ internal static class Tools
     /// Which browser the bundled aws-azure-login drives. Puppeteer's own Chromium if it came along,
     /// otherwise a bundled tools\chromium, otherwise Microsoft Edge (installed on every Windows 10/11 PC).
     /// </summary>
-    private static Dictionary<string, string> BrowserEnv()
+    /// <summary>
+    /// The browser for sign-in. aws-azure-login launches Puppeteer without a browser path, so Puppeteer uses its own
+    /// Chromium (in node_modules\puppeteer\.local-chromium) unless PUPPETEER_EXECUTABLE_PATH says otherwise. If that
+    /// Chromium is missing or incomplete (no chrome.exe: an interrupted download, or security software removed it),
+    /// point Puppeteer at tools\chromium or Microsoft Edge instead. Null = leave it to Puppeteer.
+    /// </summary>
+    private static Dictionary<string, string> BrowserEnv(string packageDir)
     {
-        string pkg = Path.Combine(Dir, "aws-azure-login");
-        if (Directory.Exists(Path.Combine(pkg, "node_modules", "puppeteer", ".local-chromium"))) return null; // Puppeteer finds it itself
+        if (packageDir == null || !Directory.Exists(packageDir)) return null;   // can't tell: leave it to Puppeteer
+
+        string local = Path.Combine(packageDir, "node_modules", "puppeteer", ".local-chromium");
+        bool complete = false;
+        try { complete = Directory.Exists(local) && Directory.EnumerateFiles(local, "chrome.exe", SearchOption.AllDirectories).Any(); }
+        catch { }
+        if (complete) return null;   // Puppeteer's own Chromium is there
 
         string browser = Existing(Path.Combine(Dir, "chromium", "chrome.exe")) ?? FindEdge();
-        return browser == null ? null : new Dictionary<string, string> { ["BROWSER_CHROME_BIN"] = browser };
+        Log.Write(browser == null
+            ? "Puppeteer's Chromium is missing or incomplete, and no other browser was found for sign-in"
+            : $"Puppeteer's Chromium is missing or incomplete; signing in with {browser}");
+        return browser == null ? null : new Dictionary<string, string> { ["PUPPETEER_EXECUTABLE_PATH"] = browser };
     }
 
     private static string FindEdge()

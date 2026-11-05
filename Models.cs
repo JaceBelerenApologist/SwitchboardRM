@@ -147,6 +147,8 @@ internal sealed class AppSettings
     public bool SavedView { get; set; }
     /// <summary>Columns for the saved-connections tab (the AWS tab uses Columns).</summary>
     public List<string> SavedColumns { get; set; } = new();
+    /// <summary>The Description column (2.17) has been added to an existing saved-tab layout once.</summary>
+    public bool DescriptionColumnAdded { get; set; }
     /// <summary>SSH user for AWS servers. Empty = a guess from the OS (ec2-user, ubuntu, admin, ...).</summary>
     public string SshUser { get; set; } = "";
     /// <summary>Optional private key file for SSH. Empty = ssh's defaults (~/.ssh keys and the SSH agent).</summary>

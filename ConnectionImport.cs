@@ -51,6 +51,7 @@ internal static class ConnectionImport
                 Port = port > 0 ? port : embeddedPort,
                 User = user,
                 Group = groups.Count > 0 ? string.Join(" / ", groups) : fileName,
+                Description = Prop(server, "comment").Trim(),
             });
         }
         if (r.Found.Count == 0) r.Warnings.Add("No servers were found in this file. Is it an RDCMan .rdg file?");
@@ -143,6 +144,7 @@ internal static class ConnectionImport
                 User = ssh ? ((string)node.Attribute("Username") ?? "").Trim()
                            : JoinUser((string)node.Attribute("Domain"), (string)node.Attribute("Username")),
                 Group = folders.Count > 0 ? string.Join(" / ", folders) : "mRemoteNG",
+                Description = ((string)node.Attribute("Descr") ?? (string)node.Attribute("Description") ?? "").Trim(),
             });
         }
         if (skipped > 0) r.Warnings.Add($"{skipped} connection(s) using other protocols (VNC, Telnet, web ...) were skipped.");
