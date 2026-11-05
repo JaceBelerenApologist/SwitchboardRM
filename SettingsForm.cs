@@ -175,7 +175,7 @@ internal sealed class SettingsForm : Form
                 x += 44;
             }
             TextRenderer.DrawText(e.Graphics, "Settings", headerFont, new Rectangle(x, 0, header.Width - x, header.Height - 8),
-                p.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+                p.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
         };
         header.Disposed += (_, _) => headerFont.Dispose();
         _nav.Items.AddRange(new object[] { "AWS profile", "RDP credentials", "Terminal & SSH", "Appearance", "About" });
@@ -213,7 +213,7 @@ internal sealed class SettingsForm : Form
         }
         TextRenderer.DrawText(e.Graphics, _nav.Items[e.Index].ToString(), _nav.Font,
             new Rectangle(e.Bounds.Left + 20, e.Bounds.Top, e.Bounds.Width - 20, e.Bounds.Height),
-            sel ? p.Text : p.Muted, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+            sel ? p.Text : p.Muted, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
     }
 
     private static FlowLayoutPanel NewPage() => new()
@@ -224,25 +224,25 @@ internal sealed class SettingsForm : Form
 
     private static Label Title(string text) => new()
     {
-        Text = text, AutoSize = true, Font = new Font("Segoe UI Semibold", 15F), Margin = new Padding(0, 0, 0, 6),
+        Text = text, UseMnemonic = false, AutoSize = true, Font = new Font("Segoe UI Semibold", 15F), Margin = new Padding(0, 0, 0, 6),
     };
 
     private static Label Heading(string text) => new()
     {
-        Text = text, AutoSize = true, Font = new Font("Segoe UI Semibold", 10.5F), Margin = new Padding(0, 18, 0, 3),
+        Text = text, UseMnemonic = false, AutoSize = true, Font = new Font("Segoe UI Semibold", 10.5F), Margin = new Padding(0, 18, 0, 3),
     };
 
     private static Label Muted(string text) => new()
     {
-        Text = text, AutoSize = true, MaximumSize = new Size(ContentWidth, 0), Tag = "muted", Margin = new Padding(0, 0, 0, 8),
+        Text = text, UseMnemonic = false, AutoSize = true, MaximumSize = new Size(ContentWidth, 0), Tag = "muted", Margin = new Padding(0, 0, 0, 8),
     };
 
     private static Label Accent(string text) => new()
     {
-        Text = text, AutoSize = true, MaximumSize = new Size(ContentWidth, 0), Tag = "accent", Margin = new Padding(0, 4, 0, 8),
+        Text = text, UseMnemonic = false, AutoSize = true, MaximumSize = new Size(ContentWidth, 0), Tag = "accent", Margin = new Padding(0, 4, 0, 8),
     };
 
-    private static Label FieldLabel(string text) => new() { Text = text, AutoSize = true, Margin = new Padding(0, 8, 0, 3) };
+    private static Label FieldLabel(string text) => new() { Text = text, UseMnemonic = false, AutoSize = true, Margin = new Padding(0, 8, 0, 3) };
 
     private static Button Btn(string text, bool primary = false) => new()
     {

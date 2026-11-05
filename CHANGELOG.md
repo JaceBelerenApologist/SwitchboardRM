@@ -3,6 +3,11 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.15.1 (2026-11-06)
+
+- Fixed: Settings showed "Terminal _SSH" instead of "Terminal & SSH" (Windows drew the "&" as a keyboard-shortcut
+  underline). Settings text now shows "&" as written.
+
 ## 2.15.0 (2026-11-05)
 
 - Nothing outlives Switchboard: every tunnel, ssh, shell and sign-in helper it starts is tied to it (a Windows job
