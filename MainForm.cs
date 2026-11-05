@@ -356,6 +356,9 @@ internal sealed class MainForm : Form
         server.DropDownOpening += (_, _) => UpdateActionStates();
 
         var help = new ToolStripMenuItem("&Help");
+        help.DropDownItems.Add(new ToolStripMenuItem("&Check for tool updates", null, async (_, _) => await RunToolUpdateAsync(checkOnly: true)));
+        help.DropDownItems.Add(new ToolStripMenuItem("&Update helper tools ...", null, async (_, _) => await RunToolUpdateAsync(checkOnly: false)));
+        help.DropDownItems.Add(new ToolStripSeparator());
         help.DropDownItems.Add(new ToolStripMenuItem("&About " + AppInfo.ShortName, null,
             async (_, _) => await OpenSettingsAsync(SettingsForm.Page.About)));
 
@@ -1390,6 +1393,41 @@ internal sealed class MainForm : Form
         return shell.CommandLine + " -NoExit -EncodedCommand " + TerminalSchemes.EncodedStyling(Theme.TerminalScheme);
     }
 
+    /// <summary>
+    /// The tool-update tab runs with Switchboard's plain environment: with the bundled tools first on PATH, the collect
+    /// step would find (and try to copy) the bundled copies onto themselves instead of the installed ones.
+    /// </summary>
+    private Dictionary<string, string> PlainOrShellEnvironment(ShellInfo shell) =>
+        shell.Id == ToolScripts.ShellId ? new Dictionary<string, string>() : ShellEnvironment();
+
+    /// <summary>
+    /// Help > Check for tool updates / Update helper tools: run update-tools.ps1 in a tab, so its progress can be
+    /// watched. Missing scripts are written back first.
+    /// </summary>
+    private async Task RunToolUpdateAsync(bool checkOnly)
+    {
+        if (!checkOnly && _sessions.Any(x => x.Tunnel != null))
+        {
+            MessageBox.Show(this, "Close your AWS tabs first. Their tunnels are using the Session Manager plugin, which " +
+                                  "can't be replaced while it's running.", "Update helper tools",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        string script = ToolScripts.Ensure(out string problem);
+        if (script == null)
+        {
+            MessageBox.Show(this, problem, "Update helper tools", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        string cmd = $"\"{ToolScripts.PowerShell()}\" -NoLogo -NoProfile -ExecutionPolicy Bypass -File \"{script}\"" +
+                     (checkOnly ? " -CheckOnly" : "");
+        var shell = new ShellInfo(ToolScripts.ShellId, checkOnly ? "Tool update check" : "Updating tools", cmd);
+        await OpenShellAsync(shell);
+        SetStatus(checkOnly ? "Checking the helper tools for updates (see the tab)"
+                            : "Updating the helper tools (see the tab). Windows may ask for admin rights for the installers.");
+    }
+
     /// <summary>Open a local shell in a new tab, starting in the user folder.</summary>
     private async Task OpenShellAsync(ShellInfo shell, bool docked = false)
     {
@@ -1425,7 +1463,7 @@ internal sealed class MainForm : Form
         {
             page.Text = ThemedTabControl.IconSpace + name;
             term.Reset();
-            term.Run(ShellCommandLine(shell), home, ShellEnvironment());
+            term.Run(ShellCommandLine(shell), home, PlainOrShellEnvironment(shell));
         };
 
         try
@@ -1443,7 +1481,7 @@ internal sealed class MainForm : Form
             MessageBox.Show(this, msg, "Could not open the terminal", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
-        term.Run(ShellCommandLine(shell), home, ShellEnvironment());
+        term.Run(ShellCommandLine(shell), home, PlainOrShellEnvironment(shell));
         term.FocusTerminal();
         SetStatus($"Opened {name}" + (Profile.Length > 0 ? $" (AWS_PROFILE={Profile})" : ""));
     }
@@ -1754,6 +1792,7 @@ internal sealed class MainForm : Form
         _settings.Profile = Profile;
         _settings.Save();
 
+        if (f.ToolUpdateRequested is bool checkOnly) { await RunToolUpdateAsync(checkOnly); return; }
         if (f.SignInRequested) await SignInAsync();
         else if (profileChanged || f.RegionsChanged)
         {

@@ -192,6 +192,19 @@ When the setup window is done, click **Sign in**.
 - Direct (saved) RDP connections verify the server certificate and warn if it can't be verified, like `mstsc`.
 - Removing a profile backs up `~/.aws/config` and `~/.aws/credentials` first (`*.switchboard-backup`).
 
+## Automated builds
+
+`.github/workflows/build.yml` builds Switchboard on GitHub's Windows machines:
+
+- **Push to `main` or a pull request:** compiles it and keeps the zipped app with the run (Actions tab > the run >
+  Artifacts).
+- **Version tag** (`vX.Y.Z`, as pushed by `git-release.ps1`): installs Node.js, aws-azure-login, the Session Manager
+  plugin and the AWS CLI on the build machine, collects them with their licences, publishes, and creates the GitHub
+  Release with the zip and that version's CHANGELOG notes. The tag must match `<Version>` in the `.csproj`.
+- **Run by hand** (Actions tab > Build > Run workflow): a full build, with or without the tools, kept with the run.
+
+So the normal release routine is: bump the version and changelog, then run `git-release.ps1`.
+
 ## Building a release with bundled tools
 
 For maintainers who publish the ready-to-run download (Option A).
@@ -230,7 +243,8 @@ For maintainers who publish the ready-to-run download (Option A).
 People who download a release run the tool versions you collected, so refresh them regularly. Node.js and Chromium
 in particular get frequent security fixes.
 
-`update-tools.ps1` does the checking and updating for you, then refreshes `tools\`:
+In the app: **Help > Check for tool updates** or **Help > Update helper tools** runs this in a tab (and writes the
+scripts back if they've been deleted). From a terminal, `update-tools.ps1` does the same:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\update-tools.ps1              # check, update, refresh tools\

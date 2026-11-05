@@ -3,6 +3,15 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.16.0 (2026-11-06)
+
+- Update the helper tools from inside Switchboard: Help > Check for tool updates (report only) and Help > Update
+  helper tools (also on Settings > About). update-tools.ps1 runs in a tab, so its progress can be watched: it updates
+  Node.js, aws-azure-login, the Session Manager plugin and the AWS CLI on this PC (winget and npm), then refreshes
+  the tools folder. Not while AWS tabs are open (their tunnels use the plugin being replaced).
+- update-tools.ps1 and collect-tools.ps1 are built into Switchboard: if either is missing from its folder, it's written
+  back before running (an edited copy is left as it is).
+
 ## 2.15.1 (2026-11-06)
 
 - Fixed: Settings showed "Terminal _SSH" instead of "Terminal & SSH" (Windows drew the "&" as a keyboard-shortcut

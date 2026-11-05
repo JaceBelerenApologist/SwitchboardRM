@@ -168,9 +168,15 @@ if ($NoCollect) {
     Write-Host 'Refreshing tools\ from the installed tools (collect-tools.ps1) ...' -ForegroundColor Green
     & $collect
     Write-Host ''
-    Write-Host 'tools\ is up to date. Publish (publish.cmd) to put it in output\.' -ForegroundColor Green
-    if ($changed) {
-        Write-Host 'Tools were updated: release this as a new PATCH version if you distribute the bundle.' -ForegroundColor Green
+    if (Test-Path (Join-Path $PSScriptRoot 'publish.cmd')) {
+        # the project folder
+        Write-Host 'tools\ is up to date. Publish (publish.cmd) to put it in output\.' -ForegroundColor Green
+        if ($changed) {
+            Write-Host 'Tools were updated: release this as a new PATCH version if you distribute the bundle.' -ForegroundColor Green
+        }
+    } else {
+        # next to SwitchboardRM.exe
+        Write-Host 'tools\ is up to date. Restart Switchboard to use the updated tools.' -ForegroundColor Green
     }
 }
 if ($failed) { Write-Host 'Some updates failed; see the messages above.' -ForegroundColor Yellow }

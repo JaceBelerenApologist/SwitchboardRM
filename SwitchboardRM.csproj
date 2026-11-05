@@ -11,7 +11,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <!-- Version: bump this for each release (PATCH = fixes, MINOR = features, MAJOR = breaking changes)
          and add a section to CHANGELOG.md. Shown on Settings > About and in the .exe's Properties > Details. -->
-    <Version>2.15.1</Version>
+    <Version>2.16.0</Version>
     <Product>Switchboard Remote Manager</Product>
     <Copyright>© 2026 Nick Morrissey</Copyright>
     <Description>Switchboard Remote Manager</Description>
@@ -28,6 +28,9 @@
     <EmbeddedResource Include="Assets\app.ico" LogicalName="SwitchboardRM.app.ico" />
     <EmbeddedResource Include="Assets\app.png" LogicalName="SwitchboardRM.app.png" />
     <EmbeddedResource Include="CHANGELOG.md" LogicalName="SwitchboardRM.CHANGELOG.md" />
+    <!-- written back next to the .exe if deleted (Help > Update helper tools) -->
+    <EmbeddedResource Include="update-tools.ps1" LogicalName="SwitchboardRM.scripts.update-tools.ps1" />
+    <EmbeddedResource Include="collect-tools.ps1" LogicalName="SwitchboardRM.scripts.collect-tools.ps1" />
     <!-- adds Entra's login_hint to aws-azure-login's sign-in page (see Tools.AzureLogin) -->
     <EmbeddedResource Include="Assets\login-hint-shim.js" LogicalName="SwitchboardRM.login-hint-shim.js" />
     <!-- the SSH terminal page: xterm.js 5.5.0 + fit add-on 0.10.0 (MIT, see Assets\terminal\LICENSE-xterm.txt) -->

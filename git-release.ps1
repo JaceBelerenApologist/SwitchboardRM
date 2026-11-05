@@ -152,5 +152,13 @@ Write-Host "Tagged and pushed $tag"
 # ---------------------------------------------------------------- where to make the release
 $web = $remote -replace '^git@github\.com:', 'https://github.com/' -replace '\.git$', ''
 Write-Host ''
-Write-Host "Done. Create the GitHub Release (and attach the zipped output\ folder) at:" -ForegroundColor Green
-Write-Host "  $web/releases/new?tag=$tag"
+if (Test-Path (Join-Path $PSScriptRoot '.github\workflows\build.yml')) {
+    # the Build workflow builds the release (with the tools bundled) for every version tag
+    Write-Host "Done. GitHub is now building the $tag release (about 10 minutes); follow it at:" -ForegroundColor Green
+    Write-Host "  $web/actions"
+    Write-Host "When it finishes, the release with the zipped app is at:"
+    Write-Host "  $web/releases/tag/$tag"
+} else {
+    Write-Host "Done. Create the GitHub Release (and attach the zipped output\ folder) at:" -ForegroundColor Green
+    Write-Host "  $web/releases/new?tag=$tag"
+}

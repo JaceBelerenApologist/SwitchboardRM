@@ -221,4 +221,5 @@ Set-Content -Path (Join-Path $root 'THIRD-PARTY-NOTICES.txt') -Encoding UTF8 -Va
 
 $mb = (Get-ChildItem $root -Recurse -File | Measure-Object Length -Sum).Sum / 1MB
 Write-Host ''
-Write-Host ("Done. tools folder: {0:N0} MB, with licences and THIRD-PARTY-NOTICES.txt. Publish to ship it." -f $mb) -ForegroundColor Green
+$next = if (Test-Path (Join-Path $PSScriptRoot 'publish.cmd')) { 'Publish to ship it.' } else { 'Restart Switchboard to use it.' }
+Write-Host ("Done. tools folder: {0:N0} MB, with licences and THIRD-PARTY-NOTICES.txt. {1}" -f $mb, $next) -ForegroundColor Green
