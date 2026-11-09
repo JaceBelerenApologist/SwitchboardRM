@@ -3,6 +3,12 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.18.2 (2026-11-09)
+
+- Release of 2.18.1's fixes with the new build process: every push to main is a full build with the helper tools
+  bundled and checked (including Puppeteer's Chromium and ConPTY), and the release for a new version is published
+  automatically. No changes to the app itself since 2.18.1.
+
 ## 2.18.1 (2026-11-09)
 
 - Fixed: a release build could sign in with Microsoft Edge, which then went straight on to the AWS console in the

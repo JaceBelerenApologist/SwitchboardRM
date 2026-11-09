@@ -196,16 +196,18 @@ When the setup window is done, click **Sign in**.
 
 ## Automated builds
 
-`.github/workflows/build.yml` builds Switchboard on GitHub's Windows machines:
+`.github/workflows/build.yml` builds Switchboard on GitHub's Windows machines. The version number decides releases:
 
-- **Push to `main` or a pull request:** compiles it and keeps the zipped app with the run (Actions tab > the run >
-  Artifacts).
-- **Version tag** (`vX.Y.Z`, as pushed by `git-release.ps1`): installs Node.js, aws-azure-login, the Session Manager
-  plugin and the AWS CLI on the build machine, collects them with their licences, publishes, and creates the GitHub
-  Release with the zip and that version's CHANGELOG notes. The tag must match `<Version>` in the `.csproj`.
-- **Run by hand** (Actions tab > Build > Run workflow): a full build, with or without the tools, kept with the run.
+- **Push to `main`:** a full build with the helper tools bundled (checked before zipping), kept with the run
+  (Actions tab > the run > Artifacts). If `<Version>` in the `.csproj` hasn't been released yet, it also publishes the
+  GitHub Release `vX.Y.Z` (creating the tag) with the zip and that version's CHANGELOG notes. An existing release is
+  never replaced: bump the version to publish a new one.
+- **Pull request:** compile only.
+- **Run by hand** (Actions tab > Build > Run workflow): a full build kept with the run; tick **Publish the release**
+  to also release the current version, if it isn't released yet.
 
-So the normal release routine is: bump the version and changelog, then run `git-release.ps1`.
+So the normal release routine is: bump the version and changelog, then run `git-release.ps1`, which commits and
+pushes (and refuses a version that's already released).
 
 ## Building a release with bundled tools
 
