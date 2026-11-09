@@ -1,30 +1,41 @@
 # Builds Switchboard Remote Manager on GitHub's Windows machines.
-#   push to main / pull request : compile, and keep the zipped app as a downloadable artifact of the run
-#   version tag (v2.15.1 ...)   : full release build with the helper tools bundled, published as a GitHub Release
-#   run by hand (Actions tab)   : full build (tools optional), artifact only
+#
+#   push to main      full build with the helper tools bundled. If <Version> in SwitchboardRM.csproj hasn't been
+#                     released yet, it publishes the GitHub Release vX.Y.Z (creating the tag) with that version's
+#                     CHANGELOG notes; if it has, the build is kept as an artifact only. Bump the version to release.
+#   pull request      compile only (quick, no tools)
+#   run by hand       full build (tools optional) kept as an artifact; tick "Publish the release" to also release
+#                     the current version from this run, if it isn't released yet
 name: Build
 
 on:
   push:
     branches: [ main ]
-    tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
     inputs:
       bundle:
-        description: Bundle the helper tools (Node.js, aws-azure-login, Session Manager plugin, AWS CLI)
+        description: Bundle the helper tools (Node.js, aws-azure-login with its Chromium, Session Manager plugin, AWS CLI, ConPTY)
         type: boolean
         default: true
+      release:
+        description: Publish the release for the current version (if it isn't released yet)
+        type: boolean
+        default: false
 
 permissions:
-  contents: write   # needed to create the release for a version tag
+  contents: write   # creating the release (and its tag)
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: windows-latest
     env:
-      IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
-      BUNDLE: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.bundle) }}
+      BUNDLE: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.bundle) }}
+      RELEASE: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.release) }}
 
     steps:
       - name: Get the code
@@ -43,12 +54,10 @@ jobs:
           if (-not $m.Success) { throw 'No <Version> in SwitchboardRM.csproj' }
           $v = $m.Groups[1].Value
           "version=$v" >> $env:GITHUB_OUTPUT
-          if ($env:IS_RELEASE -eq 'true' -and $env:GITHUB_REF_NAME -ne "v$v") {
-            throw "The tag $env:GITHUB_REF_NAME doesn't match <Version>$v</Version> in SwitchboardRM.csproj"
-          }
-          Write-Host "Building version $v (bundle tools: $env:BUNDLE)"
+          Write-Host "Building version $v (bundle tools: $env:BUNDLE, release: $env:RELEASE)"
+          if ($env:RELEASE -eq 'true' -and $env:BUNDLE -ne 'true') { throw 'A release needs the tools bundled: tick both boxes' }
 
-      # ---- helper tools (release builds): installed fresh, then collected with their licences
+      # ---- helper tools: installed fresh, then collected with their licences
       - name: Set up Node.js
         if: env.BUNDLE == 'true'
         uses: actions/setup-node@v4
@@ -73,7 +82,8 @@ jobs:
             node install.js
             Pop-Location
           }
-          if (-not (& $hasChrome)) { throw "Puppeteer's Chromium is missing after installing aws-azure-login: the release would have no sign-in browser" }
+          if (-not (& $hasChrome)) { throw "Puppeteer's Chromium is missing after installing aws-azure-login: the build would have no sign-in browser" }
+
           $plugin = Join-Path $env:ProgramFiles 'Amazon\SessionManagerPlugin\bin\session-manager-plugin.exe'
           if (-not (Get-Command session-manager-plugin -ErrorAction SilentlyContinue) -and -not (Test-Path $plugin)) {
             Invoke-WebRequest 'https://s3.amazonaws.com/session-manager-downloads/plugin/latest/windows/SessionManagerPluginSetup.exe' -OutFile smp-setup.exe
@@ -93,6 +103,20 @@ jobs:
         shell: pwsh
         run: dotnet publish SwitchboardRM.csproj -c Release
 
+      - name: Check the bundle
+        if: env.BUNDLE == 'true'
+        shell: pwsh
+        run: |
+          # the zip must carry the tools next to the .exe, or the release can't sign in or connect
+          foreach ($p in 'output\SwitchboardRM.exe', 'output\tools\node\node.exe', 'output\tools\aws-azure-login',
+                         'output\tools\session-manager-plugin', 'output\tools\THIRD-PARTY-NOTICES.txt') {
+            if (-not (Test-Path $p)) { throw "Missing from the build: $p" }
+          }
+          if (-not (Get-ChildItem 'output\tools\aws-azure-login\node_modules\puppeteer\.local-chromium' -Recurse -Filter chrome.exe -ErrorAction SilentlyContinue)) {
+            throw "Missing from the build: Puppeteer's Chromium in output\tools\aws-azure-login"
+          }
+          Write-Host ('Bundle OK: {0:N0} MB' -f ((Get-ChildItem output -Recurse -File | Measure-Object Length -Sum).Sum / 1MB))
+
       - name: Zip output\
         shell: pwsh
         run: Compress-Archive -Path output\* -DestinationPath "SwitchboardRM-${{ steps.version.outputs.version }}.zip"
@@ -103,9 +127,9 @@ jobs:
           name: SwitchboardRM-${{ steps.version.outputs.version }}
           path: SwitchboardRM-${{ steps.version.outputs.version }}.zip
 
-      # ---- release (version tags only)
+      # ---- release: when this version hasn't been released yet
       - name: Publish the GitHub Release
-        if: env.IS_RELEASE == 'true'
+        if: env.RELEASE == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -113,6 +137,13 @@ jobs:
           $v = '${{ steps.version.outputs.version }}'
           $tag = "v$v"
           $zip = "SwitchboardRM-$v.zip"
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            # never replace a published release with a different build
+            Write-Host "::notice::Version $v is already released, so this build is kept as an artifact only. Bump <Version> (and the changelog) to publish a new release."
+            exit 0
+          }
 
           # that version's section of CHANGELOG.md as the release notes
           $lines = Get-Content CHANGELOG.md
@@ -123,10 +154,7 @@ jobs:
           if ($notes.Count -eq 0) { $notes.Add("Switchboard Remote Manager $v") }
           Set-Content release-notes.md ($notes -join "`n").Trim()
 
-          # already made by hand? then just attach the zip to it
-          gh release view $tag *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $zip --clobber
-          } else {
-            gh release create $tag $zip --title "Switchboard Remote Manager $v" --notes-file release-notes.md
-          }
+          # creates the tag on this commit too
+          gh release create $tag $zip --target $env:GITHUB_SHA --title "Switchboard Remote Manager $v" --notes-file release-notes.md
+          if ($LASTEXITCODE -ne 0) { throw 'Creating the release failed' }
+          Write-Host "::notice::Published release $tag"
