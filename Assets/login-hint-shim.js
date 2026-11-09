@@ -1,23 +1,31 @@
 // Switchboard Remote Manager: loaded ahead of aws-azure-login (node --require / NODE_OPTIONS).
 //
-// 1. The sign-in window: in window mode aws-azure-login starts Chromium with the sign-in page (--app=<url>), waits a
-//    fixed 200 ms and then watches whichever tab Chromium lists first for the moment Microsoft hands the sign-in to
-//    AWS. When Chromium starts slowly (a new or changed sign-in profile), that's the wrong tab: the hand-off isn't
-//    caught and the window opens the AWS console instead. Here browser.pages() waits for the sign-in window and lists
-//    it first, so aws-azure-login always watches the right one.
-// 2. The account: adds Entra's login_hint (SWITCHBOARD_LOGIN_HINT, the profile's azure_default_username) to the
-//    Microsoft sign-in address, both the --app=<url> of window mode and page.goto() of background sign-in, so Entra
-//    signs in that account instead of silently using the one signed in to Windows.
-// If anything here doesn't match what it expects, sign-in carries on exactly as aws-azure-login does it.
+// 1. Catching the sign-in. In window mode aws-azure-login starts Chromium already loading the Microsoft sign-in page
+//    (--app=<url>), and only then turns on the request interception that catches Microsoft's hand-off to AWS. When
+//    the Microsoft session is remembered, sign-in completes silently within a second, often before that interception
+//    is on: nothing catches it and the window carries on to the AWS console. So here the window starts on a small
+//    local placeholder page instead, aws-azure-login watches that window and turns its interception on, and only
+//    then (when it starts waiting for the page to load) does the window go to the real sign-in page.
+// 2. The account. Entra's login_hint (SWITCHBOARD_LOGIN_HINT, the profile's azure_default_username) is added to the
+//    Microsoft sign-in address in both window mode and background sign-in (page.goto), so Entra signs in that
+//    account instead of silently using the one signed in to Windows.
+// If anything here doesn't match what it expects, it lets aws-azure-login carry on as it would on its own.
 'use strict';
 (function () {
   const hint = process.env.SWITCHBOARD_LOGIN_HINT || '';
   const Module = require('module');
   const done = new WeakSet();
-  const appUrls = new WeakMap();   // browser -> the --app=<url> it was started with (window mode only)
+  const pending = new WeakMap();   // browser -> { url, started } for window mode: where the window should go
   const say = msg => { try { process.stderr.write('[switchboard] ' + msg + '\n'); } catch (e) { } };
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const hostOf = url => { try { return new URL(String(url)).hostname.toLowerCase(); } catch (e) { return ''; } };
+
+  const MARKER = 'switchboard-sign-in';
+  const PLACEHOLDER = 'data:text/html;charset=utf-8,' + encodeURIComponent(
+    '<!doctype html><title>Sign in</title><!--' + MARKER + '-->' +
+    '<body style="font:14px Segoe UI,sans-serif;color:#555;display:flex;align-items:center;justify-content:center;height:90vh">' +
+    'Opening the Microsoft sign-in page ...</body>');
+  const isPlaceholder = pg => { try { return String(pg.url()).includes(MARKER); } catch (e) { return false; } };
 
   function withHint(url) {
     if (!hint) return url;
@@ -34,11 +42,33 @@
     }
   }
 
-  function patchPage(page) {
+  // window mode: send the placeholder window to the real sign-in page, once
+  function startSignIn(state, goto, why) {
+    if (!state || state.started) return;
+    state.started = true;
+    say('opening the sign-in page (' + why + ')');
+    goto(state.url).catch(() => { /* aws-azure-login reports what happens next */ });
+  }
+
+  function patchPage(page, state) {
     if (!page || done.has(page) || typeof page.goto !== 'function') return page;
     done.add(page);
     const goto = page.goto.bind(page);
-    page.goto = (url, options) => goto(withHint(url), options);
+    page.goto = (url, options) => {
+      if (state && !state.started && isPlaceholder(page)) { state.started = true; }
+      return goto(withHint(url), options);
+    };
+    if (state && typeof page.waitForNavigation === 'function') {
+      // aws-azure-login turns its interception on first, then waits for the page to load: start the load here
+      const waitForNavigation = page.waitForNavigation.bind(page);
+      page.waitForNavigation = (...args) => {
+        const waiting = waitForNavigation(...args);
+        setImmediate(() => startSignIn(state, goto, 'interception is on'));
+        return waiting;
+      };
+      // safety net: never leave the window on the placeholder
+      setTimeout(() => startSignIn(state, goto, 'aws-azure-login didn\'t start it'), 8000).unref();
+    }
     return page;
   }
 
@@ -53,30 +83,24 @@
       const pages = browser.pages.bind(browser);
       browser.pages = async (...args) => {
         let list = await pages(...args);
-        const appUrl = appUrls.get(browser);
-        if (appUrl) {
-          // window mode: wait for the sign-in window (Microsoft's page, or AWS if it went straight through) ...
-          const appHost = hostOf(appUrl);
-          const isSignIn = pg => {
-            let h = '';
-            try { h = hostOf(pg.url()); } catch (e) { }
-            return h !== '' && (h === appHost || /(^|\.)(microsoftonline\.(com|us)|amazon\.com|amazonaws\.(cn|com)|amazonaws-us-gov\.com)$/.test(h));
-          };
+        const state = pending.get(browser);
+        if (state && !state.started) {
+          // window mode: wait for the placeholder window (a local page: it's there almost at once) and put it first,
+          // which is the tab aws-azure-login watches
           const deadline = Date.now() + 30000;
-          while (!list.some(isSignIn) && Date.now() < deadline) {
-            await sleep(250);
+          while (!list.some(isPlaceholder) && Date.now() < deadline) {
+            await sleep(100);
             list = await pages(...args);
           }
-          // ... and put it first, which is the tab aws-azure-login watches
-          const signIn = list.filter(isSignIn);
-          if (signIn.length > 0) {
-            if (list[0] !== signIn[0]) say('the sign-in window wasn\'t the first tab; watching it instead (' + list.length + ' tabs)');
-            list = signIn.concat(list.filter(pg => !isSignIn(pg)));
-          } else {
-            say('the sign-in window didn\'t appear within 30 seconds; leaving the tabs as they are');
+          const window = list.find(isPlaceholder);
+          if (window) {
+            list = [window].concat(list.filter(pg => pg !== window));
+            return list.map(pg => patchPage(pg, pg === window ? state : null));
           }
+          say('the sign-in window didn\'t appear; opening the sign-in page in the first tab');
+          if (list[0]) startSignIn(state, list[0].goto.bind(list[0]), 'no placeholder window');
         }
-        return list.map(patchPage);
+        return list.map(pg => patchPage(pg));
       };
     }
     return browser;
@@ -87,18 +111,18 @@
     done.add(p);
     const launch = p.launch.bind(p);
     p.launch = async (options, ...rest) => {
-      let appUrl = null;
+      let state = null;
       try {
         if (options && Array.isArray(options.args)) {
           options.args = options.args.map(a => {
             if (typeof a !== 'string' || !a.startsWith('--app=')) return a;
-            appUrl = withHint(a.slice('--app='.length));
-            return '--app=' + appUrl;
+            state = { url: withHint(a.slice('--app='.length)), started: false };
+            return '--app=' + PLACEHOLDER;
           });
         }
-      } catch (e) { appUrl = null; }
+      } catch (e) { state = null; }
       const browser = await launch(options, ...rest);
-      if (appUrl && browser) appUrls.set(browser, appUrl);
+      if (state && browser) pending.set(browser, state);
       return patchBrowser(browser);
     };
   }

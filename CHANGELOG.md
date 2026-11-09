@@ -3,6 +3,14 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.18.4 (2026-11-10)
+
+- Fixed properly: sign-in going on to the AWS console in the sign-in window instead of completing (2.18.3 made it
+  worse, especially when the Microsoft session was remembered). The cause was a race in aws-azure-login's window
+  mode: it starts the browser already loading the sign-in page and only then turns on the interception that catches
+  Microsoft's hand-off to AWS, so a quick sign-in could finish first. The sign-in window now opens on a small local
+  page, aws-azure-login turns its interception on, and only then does the window go to the Microsoft sign-in page.
+
 ## 2.18.3 (2026-11-10)
 
 - Fixed: the first sign-in sometimes opened the AWS console in the small sign-in window instead of finishing. When
