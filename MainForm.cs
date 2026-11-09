@@ -1863,6 +1863,14 @@ internal sealed class MainForm : Form
             ? $"Sign-in for {profile}: asking Entra for {hint} (login_hint)"
             : $"Sign-in for {profile}: no azure_default_username in ~/.aws/config, so no account hint is sent");
 
+        // only ever Puppeteer's own Chromium: if it isn't there, say so rather than open any other browser
+        string browserProblem = Tools.SignInBrowserProblem();
+        if (browserProblem != null)
+        {
+            Log.Write("Sign-in not started: " + browserProblem.Replace("\n", " "));
+            return (1, "", browserProblem);
+        }
+
         var args = new List<string> { "--profile", profile };
         args.AddRange(extraArgs);
         var (file, list, env) = Tools.AzureLogin(hint, args.ToArray());

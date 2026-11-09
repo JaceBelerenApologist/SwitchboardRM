@@ -8,7 +8,7 @@ namespace SwitchboardRM;
 ///
 ///   tools\node\node.exe                                      Node.js runtime (runs aws-azure-login)
 ///   tools\aws-azure-login\                                   the npm package with its node_modules
-///   tools\chromium\chrome.exe                                optional; otherwise Microsoft Edge shows the sign-in page
+///                                                            (with Puppeteer's own Chromium: the only sign-in browser)
 ///   tools\session-manager-plugin\session-manager-plugin.exe  carries the RDP tunnel
 ///   tools\aws-cli\aws.exe                                    AWS CLI v2, only for "aws sso login"
 ///
@@ -70,22 +70,18 @@ internal static class Tools
             if (shim != null) { a.Add("--require"); a.Add(shim); }
             a.Add(BundledAzureLogin);
             a.AddRange(args);
-            var env = BrowserEnv(Path.Combine(Dir, "aws-azure-login")) ?? new Dictionary<string, string>();
+            var env = BrowserEnv();
             if (shim != null) env["SWITCHBOARD_LOGIN_HINT"] = loginHint.Trim();
             return (BundledNode, a, env);
         }
 
         var c = new List<string> { "/c", "aws-azure-login" };
         c.AddRange(args);
-        // an installed aws-azure-login lives in npm's global folder: same check on its Chromium
-        string installedPackage = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                                               "npm", "node_modules", "aws-azure-login");
-        var installedEnv = BrowserEnv(installedPackage);
+        var installedEnv = BrowserEnv();
         if (shim != null)
         {
             // an installed aws-azure-login is started by npm's wrapper, so the shim goes in through NODE_OPTIONS
             // (forward slashes: NODE_OPTIONS treats backslashes as escapes)
-            installedEnv ??= new Dictionary<string, string>();
             installedEnv["NODE_OPTIONS"] = $"--require \"{shim.Replace('\\', '/')}\"";
             installedEnv["SWITCHBOARD_LOGIN_HINT"] = loginHint.Trim();
         }
@@ -114,45 +110,35 @@ internal static class Tools
     }
 
     /// <summary>
-    /// Which browser the bundled aws-azure-login drives. Puppeteer's own Chromium if it came along,
-    /// otherwise a bundled tools\chromium, otherwise Microsoft Edge (installed on every Windows 10/11 PC).
+    /// Sign-in always uses Puppeteer's own Chromium, the one inside aws-azure-login (node_modules\puppeteer\
+    /// .local-chromium), and nothing else. PUPPETEER_EXECUTABLE_PATH is cleared for the sign-in, so nothing set on the
+    /// PC can point it at another browser.
     /// </summary>
-    /// <summary>
-    /// The browser for sign-in. aws-azure-login launches Puppeteer without a browser path, so Puppeteer uses its own
-    /// Chromium (in node_modules\puppeteer\.local-chromium) unless PUPPETEER_EXECUTABLE_PATH says otherwise. If that
-    /// Chromium is missing or incomplete (no chrome.exe: an interrupted download, or security software removed it),
-    /// point Puppeteer at tools\chromium or Microsoft Edge instead. Null = leave it to Puppeteer.
-    /// </summary>
-    private static Dictionary<string, string> BrowserEnv(string packageDir)
-    {
-        if (packageDir == null || !Directory.Exists(packageDir)) return null;   // can't tell: leave it to Puppeteer
+    private static Dictionary<string, string> BrowserEnv() => new() { ["PUPPETEER_EXECUTABLE_PATH"] = "" };
 
-        string local = Path.Combine(packageDir, "node_modules", "puppeteer", ".local-chromium");
+    /// <summary>aws-azure-login as installed with npm (used when there's no bundled copy).</summary>
+    private static string InstalledAzureLoginDir =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm", "node_modules", "aws-azure-login");
+
+    /// <summary>
+    /// Null when Puppeteer's Chromium is there, complete; otherwise what's wrong, for the sign-in error. Switchboard
+    /// doesn't fall back to another browser.
+    /// </summary>
+    public static string SignInBrowserProblem()
+    {
+        string package = HasBundledAzureLogin ? Path.Combine(Dir, "aws-azure-login") : InstalledAzureLoginDir;
+        if (!Directory.Exists(package)) return null;   // aws-azure-login itself missing: that error comes from running it
+
+        string local = Path.Combine(package, "node_modules", "puppeteer", ".local-chromium");
         bool complete = false;
         try { complete = Directory.Exists(local) && Directory.EnumerateFiles(local, "chrome.exe", SearchOption.AllDirectories).Any(); }
         catch { }
-        if (complete) return null;   // Puppeteer's own Chromium is there
+        if (complete) return null;
 
-        string browser = Existing(Path.Combine(Dir, "chromium", "chrome.exe")) ?? FindEdge();
-        Log.Write(browser == null
-            ? "Puppeteer's Chromium is missing or incomplete, and no other browser was found for sign-in"
-            : $"Puppeteer's Chromium is missing or incomplete; signing in with {browser}");
-        return browser == null ? null : new Dictionary<string, string> { ["PUPPETEER_EXECUTABLE_PATH"] = browser };
-    }
-
-    private static string FindEdge()
-    {
-        foreach (var root in new[]
-                 {
-                     Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-                     Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-                 })
-        {
-            if (string.IsNullOrEmpty(root)) continue;
-            string edge = Existing(Path.Combine(root, "Microsoft", "Edge", "Application", "msedge.exe"));
-            if (edge != null) return edge;
-        }
-        return null;
+        return "Sign-in uses the Chromium browser that comes with aws-azure-login, and it's " +
+               (Directory.Exists(local) ? "incomplete (chrome.exe is missing)" : "missing") + $" in:\n{package}\n\n" +
+               "Switchboard doesn't use any other browser for sign-in. Install Switchboard again from a current release, " +
+               "or (for a development copy) run: npm install -g aws-azure-login, then collect-tools.ps1.";
     }
 
     /// <summary>The script an npm package runs as a command, from the "bin" entry of its package.json.</summary>

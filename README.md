@@ -215,7 +215,7 @@ For maintainers who publish the ready-to-run download (Option A).
 2. Collect them, with their licences, into `tools\`:
 
    ```powershell
-   powershell -ExecutionPolicy Bypass -File .\collect-tools.ps1            # add -IncludeChromium for Chromium
+   powershell -ExecutionPolicy Bypass -File .\collect-tools.ps1
    ```
 
    | File or folder | Contents |
@@ -225,7 +225,6 @@ For maintainers who publish the ready-to-run download (Option A).
    | `tools\aws-azure-login\` | the package and its `node_modules`; `THIRD-PARTY-NOTICES.txt` lists every package with its version, licence and licence text |
    | `tools\session-manager-plugin\` | the plugin with its `LICENSE` and `NOTICE` |
    | `tools\aws-cli\` | AWS CLI v2 with its licence files |
-   | `tools\chromium\` | only with `-IncludeChromium` |
    | `tools\openssh\` | only if you put an OpenSSH build there by hand; the script leaves it as is |
 
    Where a tool's installation has no licence file, the script writes a `LICENSE-NOTE.txt` naming the licence and

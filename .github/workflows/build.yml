@@ -59,7 +59,21 @@ jobs:
         if: env.BUNDLE == 'true'
         shell: pwsh
         run: |
-          npm install -g aws-azure-login --no-fund --no-audit
+          # aws-azure-login's Puppeteer downloads its own Chromium (the only sign-in browser) while installing,
+          # unless something tells it to skip: make sure nothing does, then check it really arrived
+          Remove-Item Env:PUPPETEER_SKIP_DOWNLOAD, Env:PUPPETEER_SKIP_CHROMIUM_DOWNLOAD, Env:PUPPETEER_EXECUTABLE_PATH -ErrorAction SilentlyContinue
+          npm config delete puppeteer_skip_download --location=global 2>&1 | Out-Null
+          npm config delete puppeteer_skip_chromium_download --location=global 2>&1 | Out-Null
+          npm install -g aws-azure-login --no-fund --no-audit --foreground-scripts
+          $puppeteer = Join-Path (npm root -g).Trim() 'aws-azure-login\node_modules\puppeteer'
+          $hasChrome = { [bool](Get-ChildItem (Join-Path $puppeteer '.local-chromium') -Recurse -Filter chrome.exe -ErrorAction SilentlyContinue) }
+          if (-not (& $hasChrome)) {
+            Write-Host "Puppeteer's Chromium didn't arrive with the install; downloading it now"
+            Push-Location $puppeteer
+            node install.js
+            Pop-Location
+          }
+          if (-not (& $hasChrome)) { throw "Puppeteer's Chromium is missing after installing aws-azure-login: the release would have no sign-in browser" }
           $plugin = Join-Path $env:ProgramFiles 'Amazon\SessionManagerPlugin\bin\session-manager-plugin.exe'
           if (-not (Get-Command session-manager-plugin -ErrorAction SilentlyContinue) -and -not (Test-Path $plugin)) {
             Invoke-WebRequest 'https://s3.amazonaws.com/session-manager-downloads/plugin/latest/windows/SessionManagerPluginSetup.exe' -OutFile smp-setup.exe

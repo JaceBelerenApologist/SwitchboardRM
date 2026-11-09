@@ -3,6 +3,18 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.18.1 (2026-11-09)
+
+- Fixed: a release build could sign in with Microsoft Edge, which then went straight on to the AWS console in the
+  sign-in window. Its bundled aws-azure-login had arrived without Puppeteer's Chromium, and Switchboard fell back to
+  Edge. Sign-in now only ever uses Puppeteer's own Chromium: no Edge, no tools\chromium, and PUPPETEER_EXECUTABLE_PATH
+  is cleared for sign-in so nothing on the PC can change that. If that Chromium is missing, sign-in stops with a
+  message saying so.
+- collect-tools.ps1 stops with an error if aws-azure-login has no complete Puppeteer Chromium, lists that Chromium in
+  the notices, and no longer has -IncludeChromium (an old tools\chromium is removed). The GitHub build makes sure
+  Puppeteer's Chromium download isn't skipped, downloads it explicitly if it's missing, and fails rather than publish
+  a release without it.
+
 ## 2.18.0 (2026-11-07)
 
 - Windows sign-in windows (WAM) now appear for commands in Switchboard's terminals, such as Connect-MgGraph and

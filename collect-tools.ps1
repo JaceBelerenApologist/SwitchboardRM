@@ -17,7 +17,6 @@
                                               package with its version, licence and licence text
       tools\session-manager-plugin\           the plugin + its LICENSE / NOTICE
       tools\aws-cli\                          AWS CLI v2 (only used by SSO profiles) + its licence files
-      tools\chromium\                         only with -IncludeChromium
       tools\openssh\                          only if you put an OpenSSH build there yourself (left untouched)
       tools\conpty\                           Microsoft's ConPTY (conpty.dll + OpenConsole.exe, from the Windows
                                               Terminal project), downloaded from NuGet: lets Windows sign-in
@@ -27,9 +26,10 @@
   The tools stay in .\tools and Switchboard uses them from there while you develop; publishing copies .\tools
   next to SwitchboardRM.exe with the same layout. Re-run this after updating any of the tools.
 
-  -IncludeChromium also copies Puppeteer's own Chromium (about 300 MB) for the sign-in page.
+  Puppeteer's own Chromium, inside aws-azure-login, is the only browser Switchboard signs in with: collecting stops
+  with an error if it's missing or incomplete, so a bundle without it can't be made.
 #>
-param([switch]$IncludeChromium)
+param()
 
 $ErrorActionPreference = 'Stop'
 $root = Join-Path $PSScriptRoot 'tools'
@@ -132,34 +132,27 @@ foreach ($p in $sorted) {
 }
 Set-Content -Path (Join-Path $aalDir 'THIRD-PARTY-NOTICES.txt') -Encoding UTF8 -Value $out.ToString()
 $noText = @($sorted | Where-Object { -not $_.Text }).Count
-# Puppeteer's own Chromium, if it came along, must be complete: a folder without chrome.exe breaks sign-in
+# Puppeteer's own Chromium is the only sign-in browser: it must be there, complete
 $localChromium = Join-Path $aalDir 'node_modules\puppeteer\.local-chromium'
-if ((Test-Path $localChromium) -and -not (Get-ChildItem $localChromium -Recurse -Filter chrome.exe -ErrorAction SilentlyContinue)) {
-    Write-Warning ("Puppeteer's Chromium in aws-azure-login is incomplete (chrome.exe is missing; an interrupted download, " +
-                   "or security software removed it). Switchboard will use tools\chromium or Microsoft Edge for sign-in instead. " +
-                   "To repair it: npm install -g aws-azure-login, then run this again.")
+$chromeExe = Get-ChildItem $localChromium -Recurse -Filter chrome.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $chromeExe) {
+    throw ("aws-azure-login has no complete Puppeteer Chromium (" + $(if (Test-Path $localChromium) { 'chrome.exe is missing' } else { 'node_modules\puppeteer\.local-chromium is missing' }) +
+           "). Switchboard signs in with nothing else. Reinstall it with the download allowed " +
+           "(PUPPETEER_SKIP_DOWNLOAD and PUPPETEER_SKIP_CHROMIUM_DOWNLOAD not set): npm install -g aws-azure-login, then run this again.")
 }
+$chromeVersion = $chromeExe.VersionInfo.ProductVersion
+$chromeFiles = Ensure-Licence $chromeExe.DirectoryName 'Chromium' 'BSD 3-Clause licence (with the licences of its many bundled components, listed at chrome://credits)' 'https://chromium.googlesource.com/chromium/src/+/main/LICENSE'
+Add-Summary "Chromium (Puppeteer's, the sign-in browser)" $chromeVersion 'BSD-3-Clause (+ components)' 'https://www.chromium.org' ('aws-azure-login\' + $chromeExe.DirectoryName.Substring($aalDir.Length + 1) + '\') $chromeFiles
 Add-Summary 'aws-azure-login' $aalVersion 'MIT (packages: see its notices)' 'https://github.com/aws-azure-login/aws-azure-login' 'aws-azure-login\' 'LICENSE, THIRD-PARTY-NOTICES.txt'
 Write-Host "aws-azure-login $aalVersion ($($sorted.Count) packages)  ->  tools\aws-azure-login"
 if ($noText -gt 0) { Write-Host "  $noText package(s) have no licence file of their own; the notices name their licence and npm page." }
 
-# ---------------------------------------------------------------- 3. Chromium (optional)
+# ---------------------------------------------------------------- 3. (no separate Chromium any more)
+# Puppeteer's own Chromium inside aws-azure-login is the sign-in browser; an old tools\chromium is removed.
 $chromiumDir = Join-Path $root 'chromium'
-if ($IncludeChromium) {
-    $chrome = Get-ChildItem (Join-Path $env:USERPROFILE '.cache\puppeteer') -Recurse -Filter chrome.exe -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if ($chrome) {
-        Copy-Tree $chrome.DirectoryName $chromiumDir
-        $chromeVersion = (Get-Item (Join-Path $chromiumDir 'chrome.exe')).VersionInfo.ProductVersion
-        $files = Ensure-Licence $chromiumDir 'Chromium' 'BSD 3-Clause licence (with the licences of its many bundled components, listed at chrome://credits)' 'https://chromium.googlesource.com/chromium/src/+/main/LICENSE'
-        Add-Summary 'Chromium' $chromeVersion 'BSD-3-Clause (+ components)' 'https://www.chromium.org' 'chromium\' $files
-        Write-Host "Chromium $chromeVersion  ->  tools\chromium"
-    } else {
-        Write-Warning 'No Puppeteer Chromium found in the user cache; skipping it.'
-    }
-} elseif (Test-Path $chromiumDir) {
+if (Test-Path $chromiumDir) {
     Remove-Item $chromiumDir -Recurse -Force
-    Write-Host 'Removed tools\chromium (run with -IncludeChromium to keep it).'
+    Write-Host 'Removed tools\chromium (sign-in uses the Chromium inside aws-azure-login).'
 }
 
 # ---------------------------------------------------------------- 4. Session Manager plugin

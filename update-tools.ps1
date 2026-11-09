@@ -16,7 +16,7 @@
   brand-new npm releases are the usual way malicious code gets in; use -AllowRecent to take them anyway.
 
   OpenSSH and the WebView2 runtime are Windows components kept up to date by Windows Update, so they aren't
-  handled here. A bundled Chromium (collect-tools.ps1 -IncludeChromium) follows aws-azure-login's Puppeteer.
+  handled here. The sign-in Chromium is Puppeteer's own, inside aws-azure-login: it comes with it.
 #>
 param(
     [switch]$CheckOnly,
