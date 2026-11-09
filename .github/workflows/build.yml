@@ -150,6 +150,52 @@ jobs:
           }
           Write-Host ('Bundle OK: {0:N0} MB' -f ((Get-ChildItem output -Recurse -File | Measure-Object Length -Sum).Sum / 1MB))
 
+      - name: Build the installer
+        if: env.BUNDLE == 'true'
+        shell: pwsh
+        env:
+          PFX_BASE64: ${{ secrets.SIGNING_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.SIGNING_PFX_PASSWORD }}
+        run: |
+          $v = '${{ steps.version.outputs.version }}'
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            Write-Host 'Installing Inno Setup ...'
+            choco install innosetup -y --no-progress | Out-Null
+          }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup isn't available on the build machine" }
+
+          $isccArgs = @('/Q', "/DAppVersion=$v")
+          $pfx = Join-Path $env:RUNNER_TEMP 'installer-signing.pfx'
+          try {
+            if ($env:SIGN -eq 'true') {
+              # main: sign the setup and its uninstaller with the same certificate as SwitchboardRM.exe
+              if (-not $env:PFX_BASE64 -or -not $env:PFX_PASSWORD) { throw 'No signing secrets: a build of main is not published unsigned' }
+              [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_BASE64))
+              $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+                          Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName -Descending | Select-Object -First 1
+              if (-not $signtool) { throw "signtool.exe wasn't found on the build machine" }
+              # Inno Setup's sign command: $q is a quote, $f the file to sign, and a literal $ is written $$
+              $password = $env:PFX_PASSWORD.Replace('$', '$$')
+              $command = '$q' + $signtool.FullName + '$q sign /f $q' + $pfx + '$q /p $q' + $password + '$q' +
+                         ' /fd sha256 /tr http://timestamp.digicert.com /td sha256 /d $qSwitchboard Remote Manager$q $f'
+              $isccArgs += '/DSign', "/Ssigntool=$command"
+            }
+            & $iscc @isccArgs 'installer\SwitchboardRM.iss'
+            if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed ($LASTEXITCODE)" }
+          } finally {
+            Remove-Item $pfx -Force -ErrorAction SilentlyContinue
+          }
+
+          $setup = "installer-output\SwitchboardRM-Setup-$v.exe"
+          if (-not (Test-Path $setup)) { throw "The installer wasn't built" }
+          if ($env:SIGN -eq 'true') {
+            $sig = Get-AuthenticodeSignature $setup
+            if (-not $sig.SignerCertificate -or -not $sig.TimeStamperCertificate) { throw 'The installer is not signed and timestamped' }
+            Write-Host "Installer signed by: $($sig.SignerCertificate.Subject)"
+          }
+          Write-Host ('Installer: {0} ({1:N0} MB)' -f $setup, ((Get-Item $setup).Length / 1MB))
+
       - name: Zip output\
         shell: pwsh
         run: Compress-Archive -Path output\* -DestinationPath "SwitchboardRM-${{ steps.version.outputs.version }}.zip"
@@ -158,7 +204,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: SwitchboardRM-${{ steps.version.outputs.version }}
-          path: SwitchboardRM-${{ steps.version.outputs.version }}.zip
+          path: |
+            SwitchboardRM-${{ steps.version.outputs.version }}.zip
+            installer-output/SwitchboardRM-Setup-${{ steps.version.outputs.version }}.exe
+          if-no-files-found: error
 
       # ---- release: when this version hasn't been released yet
       - name: Publish the GitHub Release
@@ -170,6 +219,7 @@ jobs:
           $v = '${{ steps.version.outputs.version }}'
           $tag = "v$v"
           $zip = "SwitchboardRM-$v.zip"
+          $setup = "installer-output\SwitchboardRM-Setup-$v.exe"
 
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
@@ -188,6 +238,6 @@ jobs:
           Set-Content release-notes.md ($notes -join "`n").Trim()
 
           # creates the tag on this commit too
-          gh release create $tag $zip --target $env:GITHUB_SHA --title "Switchboard Remote Manager $v" --notes-file release-notes.md
+          gh release create $tag $setup $zip --target $env:GITHUB_SHA --title "SwitchboardRM v$v" --notes-file release-notes.md
           if ($LASTEXITCODE -ne 0) { throw 'Creating the release failed' }
           Write-Host "::notice::Published release $tag"
