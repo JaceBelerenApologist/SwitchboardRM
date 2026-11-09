@@ -3,6 +3,15 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.18.3 (2026-11-10)
+
+- Fixed: the first sign-in sometimes opened the AWS console in the small sign-in window instead of finishing. When
+  Chromium started slowly (a new or changed sign-in profile), aws-azure-login watched the wrong browser tab for the
+  sign-in hand-off. Switchboard's sign-in shim now waits for the sign-in window and makes aws-azure-login watch that
+  one; the log notes when it had to.
+- Fixed: the account hint (azure_default_username) wasn't added to interactive sign-ins, only background ones; it's
+  now added to both. The shim is loaded for every sign-in, with or without a configured account.
+
 ## 2.18.2 (2026-11-09)
 
 - Release of 2.18.1's fixes with the new build process: every push to main is a full build with the helper tools

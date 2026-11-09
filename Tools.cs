@@ -63,7 +63,9 @@ internal static class Tools
     /// </param>
     public static (string File, List<string> Args, Dictionary<string, string> Env) AzureLogin(string loginHint, params string[] args)
     {
-        string shim = string.IsNullOrWhiteSpace(loginHint) ? null : LoginHintShim();
+        // always loaded: it makes aws-azure-login watch the right sign-in window, and adds the account hint if there is one
+        string shim = LoginHintShim();
+        bool hasHint = !string.IsNullOrWhiteSpace(loginHint);
         if (HasBundledAzureLogin)
         {
             var a = new List<string>();
@@ -71,7 +73,7 @@ internal static class Tools
             a.Add(BundledAzureLogin);
             a.AddRange(args);
             var env = BrowserEnv();
-            if (shim != null) env["SWITCHBOARD_LOGIN_HINT"] = loginHint.Trim();
+            if (shim != null && hasHint) env["SWITCHBOARD_LOGIN_HINT"] = loginHint.Trim();
             return (BundledNode, a, env);
         }
 
@@ -83,7 +85,7 @@ internal static class Tools
             // an installed aws-azure-login is started by npm's wrapper, so the shim goes in through NODE_OPTIONS
             // (forward slashes: NODE_OPTIONS treats backslashes as escapes)
             installedEnv["NODE_OPTIONS"] = $"--require \"{shim.Replace('\\', '/')}\"";
-            installedEnv["SWITCHBOARD_LOGIN_HINT"] = loginHint.Trim();
+            if (hasHint) installedEnv["SWITCHBOARD_LOGIN_HINT"] = loginHint.Trim();
         }
         return ("cmd.exe", c, installedEnv);
     }
