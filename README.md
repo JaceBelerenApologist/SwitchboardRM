@@ -32,6 +32,8 @@ ordinary RDP and SSH connections (or imports them from RDCMan, mRemoteNG, `.rdp`
 - Linux servers default to SSH and Windows servers to RDP; Server > Connect with SSH / Remote Desktop overrides it.
 
 - Terminals can be docked in a resizable panel under the tabs, next to a remote desktop.
+- Windows sign-in windows (WAM) appear for commands like `Connect-MgGraph` in the terminals, using Microsoft's ConPTY
+  bundled in `tools\conpty`.
 - Local shells in tabs too: Command Prompt, Windows PowerShell, PowerShell 7, Git Bash and WSL (when installed),
   with `AWS_PROFILE` and the bundled AWS tools already set up.
 
@@ -243,8 +245,7 @@ For maintainers who publish the ready-to-run download (Option A).
 People who download a release run the tool versions you collected, so refresh them regularly. Node.js and Chromium
 in particular get frequent security fixes.
 
-In the app: **Help > Check for tool updates** or **Help > Update helper tools** runs this in a tab (and writes the
-scripts back if they've been deleted). From a terminal, `update-tools.ps1` does the same:
+`update-tools.ps1` does the checking and updating for you, then refreshes `tools\`:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\update-tools.ps1              # check, update, refresh tools\

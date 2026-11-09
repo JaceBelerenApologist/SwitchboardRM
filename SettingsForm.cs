@@ -14,8 +14,6 @@ internal sealed class SettingsForm : Form
     public string SelectedProfile => (_cboProfile.SelectedItem as string ?? "").Trim();
     /// <summary>"Sign in now" was clicked: the main window signs in once this closes.</summary>
     public bool SignInRequested { get; private set; }
-    /// <summary>About > Check for tool updates (true) / Update helper tools (false), run once Settings closes.</summary>
-    public bool? ToolUpdateRequested { get; private set; }
     /// <summary>Profiles removed while Settings was open (the toolbar mustn't keep showing them).</summary>
     public List<string> RemovedProfiles { get; } = new();
     /// <summary>The regions to scan were changed.</summary>
@@ -967,11 +965,6 @@ internal sealed class SettingsForm : Form
             Margin = new Padding(0, 0, 0, 10), Visible = AppIcon.Logo != null,
         };
 
-        var checkTools = Btn("Check for tool updates");
-        checkTools.Click += (_, _) => { ToolUpdateRequested = true; Close(); };
-        var updateTools = Btn("Update helper tools ...");
-        updateTools.Click += (_, _) => { ToolUpdateRequested = false; Close(); };
-
         var copy = Btn("Copy version details");
         copy.Click += (_, _) =>
         {
@@ -1009,9 +1002,7 @@ internal sealed class SettingsForm : Form
 
             Heading("Bundled tools"),
             tools,
-            ButtonRow(checkTools, updateTools),
-            Muted("Runs update-tools.ps1 in a tab: it updates Node.js, aws-azure-login, the Session Manager plugin and " +
-                  "the AWS CLI on this PC (winget and npm), then refreshes the tools folder. Also in the Help menu."),
+            Muted("Terminals: " + PseudoConsole.HostDescription + "."),
 
             ButtonRow(copy),
             _lblAboutMsg,

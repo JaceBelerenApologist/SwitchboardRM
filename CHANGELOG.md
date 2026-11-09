@@ -3,6 +3,19 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.18.0 (2026-11-07)
+
+- Windows sign-in windows (WAM) now appear for commands in Switchboard's terminals, such as Connect-MgGraph and
+  Connect-AzAccount, keeping single sign-on, device-based Conditional Access and token protection. Terminals use
+  Microsoft's ConPTY (conpty.dll and OpenConsole.exe from the Windows Terminal project) from tools\conpty, and give each
+  terminal's hidden console window to Switchboard's window, which is what WAM needs to show itself. Without
+  tools\conpty, terminals use Windows' built-in pseudo-console as before. Settings > About says which is in use.
+- collect-tools.ps1 gathers Microsoft ConPTY into tools\conpty (from NuGet, or an installed Windows Terminal), with its
+  MIT licence in the notices; release builds include it.
+- Removed: Help > Check for tool updates / Update helper tools and the matching Settings > About buttons, and the
+  copies of update-tools.ps1 and collect-tools.ps1 inside the app. Release builds bundle the tools, so users don't
+  need them installed or updated themselves; the scripts stay in the project for maintainers.
+
 ## 2.17.2 (2026-11-06)
 
 - Fixed: when Puppeteer's own Chromium was missing or incomplete, sign-in still failed ("Failed to launch the browser

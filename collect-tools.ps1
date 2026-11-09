@@ -19,6 +19,9 @@
       tools\aws-cli\                          AWS CLI v2 (only used by SSO profiles) + its licence files
       tools\chromium\                         only with -IncludeChromium
       tools\openssh\                          only if you put an OpenSSH build there yourself (left untouched)
+      tools\conpty\                           Microsoft's ConPTY (conpty.dll + OpenConsole.exe, from the Windows
+                                              Terminal project), downloaded from NuGet: lets Windows sign-in
+                                              windows (WAM) appear for commands in Switchboard's terminals
 
   Where a tool's installation has no licence file, a LICENSE-NOTE.txt names the licence and where to read it.
   The tools stay in .\tools and Switchboard uses them from there while you develop; publishing copies .\tools
@@ -206,6 +209,53 @@ if (Test-Path (Join-Path $sshDir 'ssh.exe')) {
     Write-Host "OpenSSH $sshVersion  (already in tools\openssh, left as is)"
 }
 
+# ---------------------------------------------------------------- 7. Microsoft ConPTY (conpty.dll + OpenConsole.exe)
+# Switchboard's terminals use it, when present, so their hidden console windows can be owned by Switchboard's window:
+# that's what lets WAM sign-in windows (Connect-MgGraph, Connect-AzAccount ...) appear. Without it they still work.
+$conptyDir = Join-Path $root 'conpty'
+$conptyVersion = $null
+$conptyFrom = @()
+try {
+    $zip = Join-Path $env:TEMP 'switchboard-conpty.zip'
+    $unz = Join-Path $env:TEMP 'switchboard-conpty'
+    Invoke-WebRequest 'https://www.nuget.org/api/v2/package/Microsoft.Windows.Console.ConPTY' -OutFile $zip -UseBasicParsing
+    if (Test-Path $unz) { Remove-Item $unz -Recurse -Force }
+    Expand-Archive $zip $unz -Force
+    $nuspec = Get-ChildItem $unz -Filter *.nuspec | Select-Object -First 1
+    if ($nuspec) { $conptyVersion = ([xml](Get-Content $nuspec.FullName -Raw)).package.metadata.version }
+    $conptyFrom += $unz
+} catch {
+    Write-Warning "Couldn't download Microsoft's ConPTY package from NuGet: $($_.Exception.Message)"
+}
+try {
+    # fallback: the copy inside an installed Windows Terminal
+    $wt = Get-AppxPackage -Name Microsoft.WindowsTerminal -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($wt) { $conptyFrom += $wt.InstallLocation; if (-not $conptyVersion) { $conptyVersion = "$($wt.Version) (Windows Terminal)" } }
+} catch { }
+
+$conptyDone = $false
+foreach ($src in $conptyFrom) {
+    # the x64 builds (the package also has arm64 and x86)
+    $dll = Get-ChildItem $src -Recurse -Filter conpty.dll -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'arm|x86' } | Select-Object -First 1
+    $exe = Get-ChildItem $src -Recurse -Filter OpenConsole.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'arm|x86' } | Select-Object -First 1
+    if (-not ($dll -and $exe)) { continue }
+    if (Test-Path $conptyDir) { Remove-Item $conptyDir -Recurse -Force }
+    New-Item -ItemType Directory -Force $conptyDir | Out-Null
+    Copy-Item $dll.FullName $conptyDir
+    Copy-Item $exe.FullName $conptyDir
+    Get-ChildItem $src -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match $licencePattern } |
+        ForEach-Object { Copy-Item $_.FullName $conptyDir }
+    $files = Ensure-Licence $conptyDir 'Microsoft ConPTY (Windows Terminal)' 'MIT licence' 'https://github.com/microsoft/terminal/blob/main/LICENSE'
+    Add-Summary 'Microsoft ConPTY (conpty.dll, OpenConsole.exe)' $conptyVersion 'MIT' 'https://github.com/microsoft/terminal' 'conpty\' $files
+    Write-Host "Microsoft ConPTY $conptyVersion"
+    $conptyDone = $true
+    break
+}
+if (-not $conptyDone) {
+    Write-Warning ("Microsoft ConPTY not collected: Switchboard's terminals will use Windows' built-in pseudo-console, " +
+                   "where Windows sign-in windows (WAM) can't appear.")
+}
+
 # ---------------------------------------------------------------- summary notices
 $lines = New-Object System.Collections.Generic.List[string]
 $lines.Add('Third-party tools bundled with Switchboard Remote Manager')
@@ -228,5 +278,4 @@ Set-Content -Path (Join-Path $root 'THIRD-PARTY-NOTICES.txt') -Encoding UTF8 -Va
 
 $mb = (Get-ChildItem $root -Recurse -File | Measure-Object Length -Sum).Sum / 1MB
 Write-Host ''
-$next = if (Test-Path (Join-Path $PSScriptRoot 'publish.cmd')) { 'Publish to ship it.' } else { 'Restart Switchboard to use it.' }
-Write-Host ("Done. tools folder: {0:N0} MB, with licences and THIRD-PARTY-NOTICES.txt. {1}" -f $mb, $next) -ForegroundColor Green
+Write-Host ("Done. tools folder: {0:N0} MB, with licences and THIRD-PARTY-NOTICES.txt. Publish to ship it." -f $mb) -ForegroundColor Green

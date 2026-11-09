@@ -6,9 +6,13 @@ using Microsoft.Win32.SafeHandles;
 namespace SwitchboardRM;
 
 /// <summary>
-/// Runs a console program (here ssh.exe) inside a Windows pseudo-console (ConPTY, Windows 10 1809+), so its
-/// screen output arrives as text with terminal escape codes and keystrokes can be sent back. The same mechanism
-/// Windows Terminal uses. Output and Exited are raised on a background thread.
+/// Runs a console program (ssh.exe, a shell ...) inside a pseudo-console (ConPTY), so its screen output arrives as text
+/// with terminal escape codes and keystrokes can be sent back. Output and Exited are raised on a background thread.
+///
+/// Uses Microsoft's conpty.dll from tools\conpty when it's there (the Windows Terminal one, MIT licensed): it can give
+/// each terminal's hidden console window an owner, Switchboard's main window, which is what lets Windows sign-in
+/// windows (WAM: Connect-MgGraph, Connect-AzAccount ...) appear. Without it, Windows' built-in pseudo-console is used,
+/// and those sign-in windows stay invisible.
 /// </summary>
 internal sealed class PseudoConsole : IDisposable
 {
@@ -16,6 +20,7 @@ internal sealed class PseudoConsole : IDisposable
     private Action<int> _onExit;
 
     private IntPtr _hpc;
+    private bool _usesConpty;   // created by conpty.dll: resized and closed by it too
     private IntPtr _process;
     private IntPtr _thread;
     private FileStream _input;
@@ -45,7 +50,23 @@ internal sealed class PseudoConsole : IDisposable
         if (!CreatePipe(out var inRead, out var inWrite, IntPtr.Zero, 0)) throw new Win32Exception();
         if (!CreatePipe(out var outRead, out var outWrite, IntPtr.Zero, 0)) throw new Win32Exception();
 
-        int hr = CreatePseudoConsole(Size(cols, rows), inRead, outWrite, 0, out _hpc);
+        int hr = -1;
+        if (Conpty.Value is { } conpty)
+        {
+            hr = conpty.Create(Size(cols, rows), inRead.DangerousGetHandle(), outWrite.DangerousGetHandle(), 0, out _hpc);
+            if (hr == 0)
+            {
+                _usesConpty = true;
+                // the hidden console window belongs to Switchboard's window, so WAM sign-in windows appear over it
+                if (OwnerWindow != IntPtr.Zero)
+                {
+                    int r = conpty.Reparent(_hpc, OwnerWindow);
+                    if (r != 0) Log.Write($"ConptyReparentPseudoConsole failed (0x{r:X8}); sign-in windows may not appear");
+                }
+            }
+            else Log.Write($"conpty.dll couldn't create a pseudo-console (0x{hr:X8}); using Windows' built-in one");
+        }
+        if (hr != 0) hr = CreatePseudoConsole(Size(cols, rows), inRead, outWrite, 0, out _hpc);
         if (hr != 0) throw new Win32Exception(hr, "Couldn't create the pseudo-console (needs Windows 10 1809 or newer).");
 
         // attach the pseudo-console to the new process
@@ -123,7 +144,7 @@ internal sealed class PseudoConsole : IDisposable
         GetExitCodeProcess(_process, out int code);
         // closing the pseudo-console flushes the last output and ends ReadLoop
         var hpc = Interlocked.Exchange(ref _hpc, IntPtr.Zero);
-        if (hpc != IntPtr.Zero) ClosePseudoConsole(hpc);
+        if (hpc != IntPtr.Zero) Close(hpc);
         _onExit?.Invoke(code);
     }
 
@@ -143,7 +164,9 @@ internal sealed class PseudoConsole : IDisposable
     public void Resize(int cols, int rows)
     {
         var hpc = _hpc;
-        if (hpc != IntPtr.Zero && cols > 0 && rows > 0) ResizePseudoConsole(hpc, Size(cols, rows));
+        if (hpc == IntPtr.Zero || cols <= 0 || rows <= 0) return;
+        if (_usesConpty && Conpty.Value is { } conpty) conpty.Resize(hpc, Size(cols, rows));
+        else ResizePseudoConsole(hpc, Size(cols, rows));
     }
 
     public void Dispose()
@@ -151,7 +174,7 @@ internal sealed class PseudoConsole : IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         // closing the pseudo-console ends the program attached to it
         var hpc = Interlocked.Exchange(ref _hpc, IntPtr.Zero);
-        if (hpc != IntPtr.Zero) ClosePseudoConsole(hpc);
+        if (hpc != IntPtr.Zero) Close(hpc);
         if (_process != IntPtr.Zero)
         {
             if (WaitForSingleObject(_process, 0) != 0) TerminateProcess(_process, 1);
@@ -209,6 +232,64 @@ internal sealed class PseudoConsole : IDisposable
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CreatePipe(out SafeFileHandle hReadPipe, out SafeFileHandle hWritePipe, IntPtr attributes, int size);
+
+    // ---------------------------------------------------------------- Microsoft's conpty.dll (tools\conpty)
+
+    /// <summary>The window that owns every terminal's hidden console window (Switchboard's main window).</summary>
+    public static IntPtr OwnerWindow;
+
+    /// <summary>Which pseudo-console new terminals get, for the log and Settings > About.</summary>
+    public static string HostDescription => Conpty.Value != null
+        ? "Microsoft ConPTY (tools\\conpty): Windows sign-in windows appear"
+        : "Windows built-in (no tools\\conpty): Windows sign-in windows can't appear in terminals";
+
+    private void Close(IntPtr hpc)
+    {
+        if (_usesConpty && Conpty.Value is { } conpty) conpty.Close(hpc);
+        else ClosePseudoConsole(hpc);
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int ConptyCreateFn(COORD size, IntPtr hInput, IntPtr hOutput, uint flags, out IntPtr phPC);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int ConptyResizeFn(IntPtr hPC, COORD size);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate void ConptyCloseFn(IntPtr hPC);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int ConptyReparentFn(IntPtr hPC, IntPtr newParent);
+
+    private sealed record ConptyApi(ConptyCreateFn Create, ConptyResizeFn Resize, ConptyCloseFn Close, ConptyReparentFn Reparent);
+
+    /// <summary>conpty.dll, loaded once; null = use Windows' built-in pseudo-console.</summary>
+    private static readonly Lazy<ConptyApi> Conpty = new(LoadConpty);
+
+    private static ConptyApi LoadConpty()
+    {
+        string dir = Path.Combine(Tools.Dir, "conpty");
+        string dll = Path.Combine(dir, "conpty.dll");
+        if (!File.Exists(dll) || !File.Exists(Path.Combine(dir, "OpenConsole.exe")))
+        {
+            Log.Write("Terminals: Windows' built-in pseudo-console (no tools\\conpty, so WAM sign-in windows won't appear in terminals)");
+            return null;
+        }
+        try
+        {
+            IntPtr lib = NativeLibrary.Load(dll);
+            T Get<T>(string name) where T : Delegate => Marshal.GetDelegateForFunctionPointer<T>(NativeLibrary.GetExport(lib, name));
+            var api = new ConptyApi(
+                Get<ConptyCreateFn>("ConptyCreatePseudoConsole"),
+                Get<ConptyResizeFn>("ConptyResizePseudoConsole"),
+                Get<ConptyCloseFn>("ConptyClosePseudoConsole"),
+                Get<ConptyReparentFn>("ConptyReparentPseudoConsole"));
+            Log.Write("Terminals: Microsoft's conpty.dll from " + dir);
+            return api;
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"Terminals: couldn't load conpty.dll ({ex.Message}); using Windows' built-in pseudo-console");
+            return null;
+        }
+    }
 
     [DllImport("kernel32.dll")]
     private static extern int CreatePseudoConsole(COORD size, SafeFileHandle hInput, SafeFileHandle hOutput, uint flags, out IntPtr phPC);
