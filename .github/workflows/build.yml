@@ -6,6 +6,9 @@
 #   pull request      compile only (quick, no tools)
 #   run by hand       full build (tools optional) kept as an artifact; tick "Publish the release" to also release
 #                     the current version from this run, if it isn't released yet
+#
+# Builds of main are code-signed: they run in the "release" environment (limited to main), whose secrets
+# SIGNING_PFX_BASE64 and SIGNING_PFX_PASSWORD hold the code-signing certificate. Other builds aren't signed.
 name: Build
 
 on:
@@ -33,7 +36,10 @@ concurrency:
 jobs:
   build:
     runs-on: windows-latest
+    # main gets the "release" environment, which holds the signing secrets; nothing else gets an environment
+    environment: ${{ (github.event_name != 'pull_request' && github.ref == 'refs/heads/main') && 'release' || '' }}
     env:
+      SIGN: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
       BUNDLE: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.bundle) }}
       RELEASE: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.release) }}
 
@@ -91,6 +97,44 @@ jobs:
       - name: Publish
         shell: pwsh
         run: dotnet publish SwitchboardRM.csproj -c Release
+
+      - name: Sign SwitchboardRM.exe
+        if: env.SIGN == 'true'
+        shell: pwsh
+        env:
+          PFX_BASE64: ${{ secrets.SIGNING_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.SIGNING_PFX_PASSWORD }}
+        run: |
+          if (-not $env:PFX_BASE64 -or -not $env:PFX_PASSWORD) {
+            throw 'The release environment has no SIGNING_PFX_BASE64 / SIGNING_PFX_PASSWORD secret: a build of main is not published unsigned'
+          }
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+                      Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw "signtool.exe wasn't found on the build machine" }
+
+          $exe = Resolve-Path 'output\SwitchboardRM.exe'
+          $pfx = Join-Path $env:RUNNER_TEMP 'signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_BASE64))
+            # SHA-256, timestamped so the signature stays valid after the certificate expires (two servers, in case one is down)
+            $signed = $false
+            foreach ($ts in 'http://timestamp.digicert.com', 'http://timestamp.sectigo.com') {
+              & $signtool.FullName sign /f $pfx /p $env:PFX_PASSWORD /fd sha256 /tr $ts /td sha256 /d 'Switchboard Remote Manager' $exe
+              if ($LASTEXITCODE -eq 0) { $signed = $true; break }
+              Write-Warning "Signing with timestamp server $ts failed; trying the next"
+            }
+            if (-not $signed) { throw 'Signing SwitchboardRM.exe failed' }
+          } finally {
+            Remove-Item $pfx -Force -ErrorAction SilentlyContinue
+          }
+
+          # the internal CA isn't trusted on GitHub's machines, so check what can be checked here: signed, by whom, timestamped
+          $sig = Get-AuthenticodeSignature $exe
+          if (-not $sig.SignerCertificate) { throw 'SwitchboardRM.exe has no signature after signing' }
+          if (-not $sig.TimeStamperCertificate) { throw 'SwitchboardRM.exe was signed without a timestamp' }
+          Write-Host "Signed by: $($sig.SignerCertificate.Subject)"
+          Write-Host "Certificate: $($sig.SignerCertificate.Thumbprint), valid until $($sig.SignerCertificate.NotAfter)"
+          Write-Host "Timestamped by: $($sig.TimeStamperCertificate.Subject)"
 
       - name: Check the bundle
         if: env.BUNDLE == 'true'
