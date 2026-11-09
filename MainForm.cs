@@ -229,6 +229,12 @@ internal sealed class MainForm : Form
         PseudoConsole.OwnerWindow = Handle;   // terminals' hidden console windows belong here, so WAM sign-in appears
     }
 
+    protected override void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        _tabKeys?.Install();   // back in Switchboard: make sure the tab-key hook is the newest again
+    }
+
     protected override void OnDpiChanged(DpiChangedEventArgs e)
     {
         base.OnDpiChanged(e);
@@ -651,14 +657,16 @@ internal sealed class MainForm : Form
             sel?.Rdp?.SyncSize();
             sel?.Term?.FocusTerminal();
             if (sel?.Rdp != null) { try { sel.Rdp.Focus(); } catch { } }
+            _tabKeys?.Install();
         };
         _timer.Tick += (_, _) => PollSessions();
         _timer.Start();
         _authTimer.Tick += async (_, _) => await AuthHeartbeatAsync();
         _authTimer.Start();
         WatchSessionState();
-        _rdpKeys = new RdpTabKeys(this);
-        Application.AddMessageFilter(_rdpKeys);   // Ctrl+Alt+Left/Right inside Remote Desktop tabs
+        // Ctrl+Alt+Left/Right, also inside remote desktops (see TabHotkeyHook)
+        _tabKeys = new TabHotkeyHook(TabKeysApply, direction => BeginInvoke(() => SwitchTab(direction)));
+        _tabKeys.Install();
     }
 
     protected override void OnShown(EventArgs e)
@@ -1071,6 +1079,7 @@ internal sealed class MainForm : Form
 
             var page = new TabPage(inst.Name) { BackColor = Theme.Current.Back };
             var host = new RdpHost(clsid) { Dock = DockStyle.Fill };
+            host.Enter += (_, _) => _tabKeys?.Install();   // stay ahead of the RDP control's own keyboard hook
             host.FocusReleased += direction => SwitchTab(direction < 0 ? -1 : +1);   // Ctrl+Alt+Left / Right
             page.Controls.Add(host);
             _tabs.TabPages.Add(page);
@@ -1127,54 +1136,25 @@ internal sealed class MainForm : Form
         return base.ProcessCmdKey(ref msg, keyData);
     }
 
-    private RdpTabKeys _rdpKeys;
+    private TabHotkeyHook _tabKeys;
 
     /// <summary>
-    /// Ctrl+Alt+Left / Ctrl+Alt+Right inside a Remote Desktop tab. The remote desktop's input window runs on this
-    /// app's UI thread, so its key presses pass through the app's message loop first: they're caught here,
-    /// switch tabs, and never reach the remote computer. (RdpHost.FocusReleased is the fallback.)
+    /// Whether the tab-key hook should take Ctrl+Alt+arrow now: Switchboard's main window is the active window, there
+    /// are tabs, and the keyboard isn't in a terminal (terminals handle these keys themselves, and a docked one moves
+    /// between the docked terminals). Called from the hook, on the UI thread.
     /// </summary>
-    private sealed class RdpTabKeys : IMessageFilter
+    private bool TabKeysApply()
     {
-        private const int WM_KEYDOWN = 0x0100, WM_SYSKEYDOWN = 0x0104;
-        private const int VK_SHIFT = 0x10, VK_CONTROL = 0x11, VK_MENU = 0x12;
-        private readonly MainForm _form;
-
-        public RdpTabKeys(MainForm form) { _form = form; }
-
-        public bool PreFilterMessage(ref Message m)
-        {
-            if (m.Msg != WM_KEYDOWN && m.Msg != WM_SYSKEYDOWN) return false;
-            var key = (Keys)(int)m.WParam & Keys.KeyCode;
-            if (key != Keys.Left && key != Keys.Right) return false;
-            if (!IsDown(VK_CONTROL) || !IsDown(VK_MENU) || IsDown(VK_SHIFT)) return false;
-            if (!_form.IsInRemoteDesktop(m.HWnd)) return false;
-
-            // held down: swallow the repeats rather than racing through the tabs
-            bool repeat = ((long)m.LParam & (1L << 30)) != 0;
-            if (!repeat) _form.BeginInvoke(() => _form.SwitchTab(key == Keys.Left ? -1 : +1));
-            return true;   // the remote computer doesn't get it
-        }
-
-        private static bool IsDown(int vk) => (GetKeyState(vk) & 0x8000) != 0;
-
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
-        private static extern short GetKeyState(int vk);
-    }
-
-    /// <summary>Is this window one of the Remote Desktop controls, or inside one?</summary>
-    private bool IsInRemoteDesktop(IntPtr hwnd)
-    {
-        foreach (var s in _sessions)
-        {
-            if (s.Rdp == null || s.Rdp.IsDisposed || !s.Rdp.IsHandleCreated) continue;
-            if (hwnd == s.Rdp.Handle || IsChild(s.Rdp.Handle, hwnd)) return true;
-        }
-        return false;
+        if (IsDisposed || !IsHandleCreated || GetForegroundWindow() != Handle || _tabs.TabCount == 0) return false;
+        Control c = ActiveControl;
+        while (c is ContainerControl cc && cc.ActiveControl != null && cc.ActiveControl != c) c = cc.ActiveControl;
+        for (var p = c; p != null; p = p.Parent)
+            if (p is TerminalHost) return false;
+        return true;
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern bool IsChild(IntPtr parent, IntPtr child);
+    private static extern IntPtr GetForegroundWindow();
 
     /// <summary>A tab key pressed inside a terminal tab.</summary>
     private void OnAppShortcut(string key, Session from)
@@ -1904,7 +1884,7 @@ internal sealed class MainForm : Form
     {
         // SystemEvents are static: leaving these attached would keep the window alive and call into it after closing
         SystemEvents.SessionSwitch -= OnSessionSwitch;
-        if (_rdpKeys != null) Application.RemoveMessageFilter(_rdpKeys);
+        _tabKeys?.Dispose();
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
@@ -2422,7 +2402,11 @@ internal sealed class MainForm : Form
     /// <summary>The toolbar's "Keep me signed in" checkbox, hosted as a toolbar item.</summary>
     private ToolStripControlHost KeepHost()
     {
-        _keepHost ??= new ToolStripControlHost(_chkKeep) { Margin = new Padding(8, 3, 4, 2), AutoSize = true };
+        if (_keepHost == null)
+        {
+            _chkKeep.Padding = new Padding(0, 0, LogicalToDeviceUnits(100), 0);   // 100 px wider than its text needs
+            _keepHost = new ToolStripControlHost(_chkKeep) { Margin = new Padding(8, 3, 4, 2), AutoSize = true };
+        }
         _tips.SetToolTip(_chkKeep,
             "On: check the AWS sign-in every few minutes and renew it in the background.\n" +
             "Off: nothing in the background; you're signed in when you connect or change a server.");

@@ -3,6 +3,15 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.18.6 (2026-11-10)
+
+- Fixed: Ctrl+Alt+Left / Ctrl+Alt+Right didn't switch tabs while a remote desktop had the keyboard. The Remote Desktop
+  control reads the keyboard outside Switchboard's own message handling, so these keys are now taken by a low-level
+  keyboard hook that sees them first (kept ahead of any hook the RDP control adds). It only acts while Switchboard is
+  the active window and not in a terminal, swallows only that arrow, and leaves every other key alone (plain
+  Ctrl+arrow still moves by word in the remote session).
+- The toolbar's "Keep me signed in" checkbox is 100 px wider.
+
 ## 2.18.5 (2026-11-10)
 
 - SwitchboardRM.exe is now code-signed (SHA-256, timestamped) with LaPrairie Group's code-signing certificate, so
