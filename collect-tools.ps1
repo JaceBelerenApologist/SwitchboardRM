@@ -62,6 +62,33 @@ function Ensure-Licence([string]$dir, [string]$tool, [string]$licence, [string]$
     return 'LICENSE-NOTE.txt'
 }
 
+# Puppeteer's own Chromium, inside an aws-azure-login folder. npm can skip Puppeteer's download script (newer npm only
+# runs allowed install scripts), and Puppeteer's downloader skips any build whose folder exists, even empty: so
+# download the exact build Puppeteer expects ourselves, from the same address, into the same place.
+function Repair-PuppeteerChromium([string]$packageDir) {
+    $puppeteer = Join-Path $packageDir 'node_modules\puppeteer'
+    $local = Join-Path $puppeteer '.local-chromium'
+    if (Get-ChildItem $local -Recurse -Filter chrome.exe -ErrorAction SilentlyContinue) { return }
+
+    $revisions = Join-Path $puppeteer 'lib\cjs\puppeteer\revisions.js'
+    $revision = if (Test-Path $revisions) { [regex]::Match((Get-Content $revisions -Raw), "chromium:\s*'(\d+)'").Groups[1].Value }
+    if (-not $revision) { throw "Couldn't tell which Chromium build Puppeteer needs (no $revisions)." }
+
+    Write-Host "Puppeteer's Chromium is missing or incomplete; downloading Chromium build $revision for it ..."
+    $zip = Join-Path $env:TEMP "switchboard-chromium-$revision.zip"
+    $previous = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'   # the progress bar makes it far slower
+    try {
+        Invoke-WebRequest "https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/$revision/chrome-win.zip" -OutFile $zip -UseBasicParsing
+        $target = Join-Path $local "win64-$revision"            # where Puppeteer 13 looks: <this>\chrome-win\chrome.exe
+        if (Test-Path $target) { Remove-Item $target -Recurse -Force }
+        New-Item -ItemType Directory -Force $target | Out-Null
+        Expand-Archive $zip $target -Force
+    } finally {
+        $ProgressPreference = $previous
+        Remove-Item $zip -ErrorAction SilentlyContinue
+    }
+}
+
 function Add-Summary($tool, $version, $licence, $source, $folder, $files) {
     $summary.Add([pscustomobject]@{ Tool = $tool; Version = $version; Licence = $licence; Source = $source; Folder = $folder; Files = $files })
 }
@@ -132,13 +159,13 @@ foreach ($p in $sorted) {
 }
 Set-Content -Path (Join-Path $aalDir 'THIRD-PARTY-NOTICES.txt') -Encoding UTF8 -Value $out.ToString()
 $noText = @($sorted | Where-Object { -not $_.Text }).Count
-# Puppeteer's own Chromium is the only sign-in browser: it must be there, complete
+# Puppeteer's own Chromium is the only sign-in browser: fetch it if it's missing, then it must be there, complete
+Repair-PuppeteerChromium $aalDir
 $localChromium = Join-Path $aalDir 'node_modules\puppeteer\.local-chromium'
 $chromeExe = Get-ChildItem $localChromium -Recurse -Filter chrome.exe -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $chromeExe) {
     throw ("aws-azure-login has no complete Puppeteer Chromium (" + $(if (Test-Path $localChromium) { 'chrome.exe is missing' } else { 'node_modules\puppeteer\.local-chromium is missing' }) +
-           "). Switchboard signs in with nothing else. Reinstall it with the download allowed " +
-           "(PUPPETEER_SKIP_DOWNLOAD and PUPPETEER_SKIP_CHROMIUM_DOWNLOAD not set): npm install -g aws-azure-login, then run this again.")
+           ") and downloading it failed. Switchboard signs in with nothing else; check the download above, then run this again.")
 }
 $chromeVersion = $chromeExe.VersionInfo.ProductVersion
 $chromeFiles = Ensure-Licence $chromeExe.DirectoryName 'Chromium' 'BSD 3-Clause licence (with the licences of its many bundled components, listed at chrome://credits)' 'https://chromium.googlesource.com/chromium/src/+/main/LICENSE'
