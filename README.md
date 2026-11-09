@@ -194,13 +194,30 @@ When the setup window is done, click **Sign in**.
 - Direct (saved) RDP connections verify the server certificate and warn if it can't be verified, like `mstsc`.
 - Removing a profile backs up `~/.aws/config` and `~/.aws/credentials` first (`*.switchboard-backup`).
 
+## Installer
+
+Each release has `SwitchboardRM-Setup-<version>.exe` as well as the zip. Run it and choose **Install for me only**
+(no admin rights; installs to `%LocalAppData%\Programs\Switchboard Remote Manager`) or **Install for all users**
+(asks for admin; installs to `Program Files`). A newer setup upgrades an installed version in place; uninstalling
+(Apps & features) keeps your settings in `%APPDATA%\SwitchboardRM`.
+
+For deployment tools such as Intune (as a Win32 app):
+
+```
+SwitchboardRM-Setup-x.y.z.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /ALLUSERS      (or /CURRENTUSER)
+"C:\Program Files\Switchboard Remote Manager\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+```
+
+The installer is defined in `installer\SwitchboardRM.iss` (Inno Setup 6). To build one locally from the current
+`output\` (unsigned), run `publish.cmd`, then `build-installer.ps1`.
+
 ## Automated builds
 
 `.github/workflows/build.yml` builds Switchboard on GitHub's Windows machines. The version number decides releases:
 
 - **Push to `main`:** a full build with the helper tools bundled (checked before zipping), kept with the run
   (Actions tab > the run > Artifacts). If `<Version>` in the `.csproj` hasn't been released yet, it also publishes the
-  GitHub Release `vX.Y.Z` (creating the tag) with the zip and that version's CHANGELOG notes. An existing release is
+  GitHub Release `vX.Y.Z` (creating the tag) with the installer, the zip and that version's CHANGELOG notes. An existing release is
   never replaced: bump the version to publish a new one.
 - **Pull request:** compile only.
 - **Run by hand** (Actions tab > Build > Run workflow): a full build kept with the run; tick **Publish the release**
@@ -208,7 +225,7 @@ When the setup window is done, click **Sign in**.
 
 **Code signing:** builds of `main` run in the repository's `release` environment (Settings > Environments, limited to
 `main`), whose secrets `SIGNING_PFX_BASE64` (the PFX, base64) and `SIGNING_PFX_PASSWORD` hold the code-signing
-certificate. `SwitchboardRM.exe` is signed (SHA-256, timestamped) before it's zipped; a build of `main` without those
+certificate. `SwitchboardRM.exe`, the installer and its uninstaller are signed (SHA-256, timestamped); a build of `main` without those
 secrets fails rather than publish unsigned. Other builds aren't signed. To renew, export the new certificate's PFX
 and replace the two secrets.
 

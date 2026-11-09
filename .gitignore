@@ -33,3 +33,4 @@ packages/
 Thumbs.db
 desktop.ini
 .DS_Store
+installer-output/

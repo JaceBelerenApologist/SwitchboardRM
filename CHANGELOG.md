@@ -3,6 +3,14 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.19.0 (2026-11-11)
+
+- An installer: releases now include SwitchboardRM-Setup-<version>.exe (signed, like the app) alongside the zip. It
+  offers "Install for me only" (no admin rights; %LocalAppData%\Programs) or "Install for all users" (admin; Program
+  Files), adds Start menu and optional desktop shortcuts and an uninstaller, upgrades an installed version in place
+  (closing Switchboard first), and installs silently with /VERYSILENT /ALLUSERS or /CURRENTUSER. Uninstalling keeps
+  your settings. The app itself is unchanged.
+
 ## 2.18.6 (2026-11-10)
 
 - Fixed: Ctrl+Alt+Left / Ctrl+Alt+Right didn't switch tabs while a remote desktop had the keyboard. The Remote Desktop
