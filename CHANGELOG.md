@@ -3,6 +3,12 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 2.18.5 (2026-11-10)
+
+- SwitchboardRM.exe is now code-signed (SHA-256, timestamped) with LaPrairie Group's code-signing certificate, so
+  Windows shows a known publisher on the organisation's PCs. Release builds of main are signed automatically; no
+  changes to the app itself.
+
 ## 2.18.4 (2026-11-10)
 
 - Fixed properly: sign-in going on to the AWS console in the sign-in window instead of completing (2.18.3 made it

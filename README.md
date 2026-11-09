@@ -206,6 +206,12 @@ When the setup window is done, click **Sign in**.
 - **Run by hand** (Actions tab > Build > Run workflow): a full build kept with the run; tick **Publish the release**
   to also release the current version, if it isn't released yet.
 
+**Code signing:** builds of `main` run in the repository's `release` environment (Settings > Environments, limited to
+`main`), whose secrets `SIGNING_PFX_BASE64` (the PFX, base64) and `SIGNING_PFX_PASSWORD` hold the code-signing
+certificate. `SwitchboardRM.exe` is signed (SHA-256, timestamped) before it's zipped; a build of `main` without those
+secrets fails rather than publish unsigned. Other builds aren't signed. To renew, export the new certificate's PFX
+and replace the two secrets.
+
 So the normal release routine is: bump the version and changelog, then run `git-release.ps1`, which commits and
 pushes (and refuses a version that's already released).
 
