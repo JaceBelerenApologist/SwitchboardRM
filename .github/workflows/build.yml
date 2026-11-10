@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       bundle:
-        description: Bundle the helper tools (Node.js, aws-azure-login with its Chromium, Session Manager plugin, AWS CLI, ConPTY)
+        description: Bundle the helper tools (Session Manager plugin, AWS CLI, ConPTY)
         type: boolean
         default: true
       release:
@@ -63,22 +63,30 @@ jobs:
           Write-Host "Building version $v (bundle tools: $env:BUNDLE, release: $env:RELEASE)"
           if ($env:RELEASE -eq 'true' -and $env:BUNDLE -ne 'true') { throw 'A release needs the tools bundled: tick both boxes' }
 
-      # ---- helper tools: installed fresh, then collected with their licences
-      - name: Set up Node.js
-        if: env.BUNDLE == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: lts/*
+      - name: Will this build publish a release?
+        id: plan
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # a release is published when this run may release (main, or a manual run with the box ticked) and the
+          # version isn't released yet; such a run keeps no artifact, since the release holds the same files
+          $publish = 'false'
+          if ($env:RELEASE -eq 'true') {
+            gh release view "v${{ steps.version.outputs.version }}" *> $null
+            if ($LASTEXITCODE -ne 0) { $publish = 'true' }
+            else { Write-Host "Version ${{ steps.version.outputs.version }} is already released: this build is kept as an artifact only" }
+          }
+          "publish=$publish" >> $env:GITHUB_OUTPUT
+          Write-Host "Publishes a release: $publish"
+          exit 0
 
+      # ---- helper tools: installed fresh, then collected with their licences
       - name: Install the helper tools
         if: env.BUNDLE == 'true'
         shell: pwsh
         run: |
-          # Puppeteer's Chromium (the only sign-in browser) is fetched and checked by collect-tools.ps1, since npm may
-          # skip Puppeteer's own download script
-          Remove-Item Env:PUPPETEER_SKIP_DOWNLOAD, Env:PUPPETEER_SKIP_CHROMIUM_DOWNLOAD, Env:PUPPETEER_EXECUTABLE_PATH -ErrorAction SilentlyContinue
-          npm install -g aws-azure-login --no-fund --no-audit
-
+          # Microsoft sign-in is built into Switchboard; these are the tools it still bundles
           $plugin = Join-Path $env:ProgramFiles 'Amazon\SessionManagerPlugin\bin\session-manager-plugin.exe'
           if (-not (Get-Command session-manager-plugin -ErrorAction SilentlyContinue) -and -not (Test-Path $plugin)) {
             Invoke-WebRequest 'https://s3.amazonaws.com/session-manager-downloads/plugin/latest/windows/SessionManagerPluginSetup.exe' -OutFile smp-setup.exe
@@ -140,13 +148,15 @@ jobs:
         if: env.BUNDLE == 'true'
         shell: pwsh
         run: |
-          # the zip must carry the tools next to the .exe, or the release can't sign in or connect
-          foreach ($p in 'output\SwitchboardRM.exe', 'output\tools\node\node.exe', 'output\tools\aws-azure-login',
-                         'output\tools\session-manager-plugin', 'output\tools\THIRD-PARTY-NOTICES.txt') {
+          # the zip must carry the tools next to the .exe, or the release can't connect
+          foreach ($p in 'output\SwitchboardRM.exe', 'output\tools\session-manager-plugin\session-manager-plugin.exe',
+                         'output\tools\aws-cli\aws.exe', 'output\tools\conpty\conpty.dll', 'output\tools\conpty\OpenConsole.exe',
+                         'output\tools\THIRD-PARTY-NOTICES.txt') {
             if (-not (Test-Path $p)) { throw "Missing from the build: $p" }
           }
-          if (-not (Get-ChildItem 'output\tools\aws-azure-login\node_modules\puppeteer\.local-chromium' -Recurse -Filter chrome.exe -ErrorAction SilentlyContinue)) {
-            throw "Missing from the build: Puppeteer's Chromium in output\tools\aws-azure-login"
+          # nothing left over from the old Microsoft sign-in
+          foreach ($p in 'output\tools\node', 'output\tools\aws-azure-login', 'output\tools\chromium') {
+            if (Test-Path $p) { throw "Shouldn't be in the build any more: $p" }
           }
           Write-Host ('Bundle OK: {0:N0} MB' -f ((Get-ChildItem output -Recurse -File | Measure-Object Length -Sum).Sum / 1MB))
 
@@ -201,6 +211,8 @@ jobs:
         run: Compress-Archive -Path output\* -DestinationPath "SwitchboardRM-${{ steps.version.outputs.version }}.zip"
 
       - name: Keep the zip with this run
+        # a release run doesn't need it (the release has the same files); other builds keep it for a week
+        if: steps.plan.outputs.publish != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: SwitchboardRM-${{ steps.version.outputs.version }}
@@ -208,10 +220,11 @@ jobs:
             SwitchboardRM-${{ steps.version.outputs.version }}.zip
             installer-output/SwitchboardRM-Setup-${{ steps.version.outputs.version }}.exe
           if-no-files-found: error
+          retention-days: 7
 
       # ---- release: when this version hasn't been released yet
       - name: Publish the GitHub Release
-        if: env.RELEASE == 'true'
+        if: steps.plan.outputs.publish == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
