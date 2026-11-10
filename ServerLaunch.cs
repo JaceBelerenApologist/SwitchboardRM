@@ -4,6 +4,8 @@ using Amazon.IdentityManagement;
 using Amazon.SimpleSystemsManagement;
 using Ssm = Amazon.SimpleSystemsManagement.Model;
 using Iam = Amazon.IdentityManagement.Model;
+// WinForms projects import System.Drawing everywhere, which also has an Image: this one is the AWS image (AMI)
+using Ec2Image = Amazon.EC2.Model.Image;
 
 namespace SwitchboardRM;
 
@@ -163,7 +165,7 @@ internal static class ServerLaunch
         };
     }
 
-    private static ImageChoice ToChoice(Image img, string name, bool mine)
+    private static ImageChoice ToChoice(Ec2Image img, string name, bool mine)
     {
         var root = L(img.BlockDeviceMappings).FirstOrDefault(b => b.DeviceName == img.RootDeviceName);
         DateTime.TryParse(Convert.ToString(img.CreationDate, System.Globalization.CultureInfo.InvariantCulture), out var created);

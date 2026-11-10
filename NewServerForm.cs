@@ -159,7 +159,7 @@ internal sealed class NewServerForm : Form
 
     // ------------------------------------------------------------------ loading
 
-    private string Region => _region.SelectedItem as string ?? "";
+    private string SelectedRegion => _region.SelectedItem as string ?? "";
 
     private async Task LoadProfilesAsync()
     {
@@ -185,11 +185,11 @@ internal sealed class NewServerForm : Form
         UpdateProfileWarning();
     }
 
-    private LaunchDefault Remembered() => _settings.LaunchDefaults.TryGetValue(Region, out var d) ? d : null;
+    private LaunchDefault Remembered() => _settings.LaunchDefaults.TryGetValue(SelectedRegion, out var d) ? d : null;
 
     private async Task LoadRegionAsync()
     {
-        string region = Region;
+        string region = SelectedRegion;
         if (region.Length == 0) return;
         int version = ++_loadVersion;
         SetBusy(true, $"Loading images, network and key pairs for {region} ...");
@@ -266,16 +266,16 @@ internal sealed class NewServerForm : Form
         if (image.RootSizeGb > 0)
         {
             _diskGb.Minimum = image.RootSizeGb;
-            int want = _clone != null && Region == _clone.Region && _clone.DiskGb > 0 ? _clone.DiskGb : Math.Max(image.RootSizeGb, (int)_diskGb.Value);
+            int want = _clone != null && SelectedRegion == _clone.Region && _clone.DiskGb > 0 ? _clone.DiskGb : Math.Max(image.RootSizeGb, (int)_diskGb.Value);
             _diskGb.Value = Math.Max(image.RootSizeGb, Math.Min(want, (int)_diskGb.Maximum));
         }
 
-        string key = Region + "|" + image.Architecture;
+        string key = SelectedRegion + "|" + image.Architecture;
         string current = TypeName(_type.Text);
         if (!_typeCache.TryGetValue(key, out var types))
         {
             _typeNote.Text = "Loading instance types ...";
-            try { types = await ServerLaunch.InstanceTypesAsync(_profile, Region, image.Architecture, _cts.Token); }
+            try { types = await ServerLaunch.InstanceTypesAsync(_profile, SelectedRegion, image.Architecture, _cts.Token); }
             catch (OperationCanceledException) { return; }
             catch (Exception ex) { _typeNote.Text = "Couldn't list instance types: " + Aws.Describe(ex); return; }
             _typeCache[key] = types;
@@ -287,7 +287,7 @@ internal sealed class NewServerForm : Form
         _type.Items.AddRange(types.Cast<object>().ToArray());
         _type.EndUpdate();
         string want = current.Length > 0 && types.Any(t => t.Name == current) ? current
-            : _clone != null && Region == _clone.Region && types.Any(t => t.Name == _clone.InstanceType) ? _clone.InstanceType
+            : _clone != null && SelectedRegion == _clone.Region && types.Any(t => t.Name == _clone.InstanceType) ? _clone.InstanceType
             : Remembered()?.InstanceType is { Length: > 0 } r && types.Any(t => t.Name == r) ? r
             : types.Any(t => t.Name == "t3.medium") ? "t3.medium" : types.FirstOrDefault()?.Name ?? "";
         Select(_type, types.FirstOrDefault(t => t.Name == want));
@@ -314,7 +314,7 @@ internal sealed class NewServerForm : Form
     private void UpdateNameWarning()
     {
         string name = _name.Text.Trim();
-        _nameWarning.Text = name.Length > 0 && _nameInUse(Region, name) ? $"A server named {name} already exists in {Region}." : "";
+        _nameWarning.Text = name.Length > 0 && _nameInUse(SelectedRegion, name) ? $"A server named {name} already exists in {SelectedRegion}." : "";
     }
 
     private void UpdateProfileWarning()
@@ -370,7 +370,7 @@ internal sealed class NewServerForm : Form
         string key = _keyPair.SelectedItem as string is { } k && k != "(none)" ? k : "";
         var spec = new LaunchSpec
         {
-            Region = Region, ImageId = image.Id, RootDevice = image.RootDevice, InstanceType = type, SubnetId = subnet.Id,
+            Region = SelectedRegion, ImageId = image.Id, RootDevice = image.RootDevice, InstanceType = type, SubnetId = subnet.Id,
             SecurityGroupIds = groups.Select(g => g.Id).ToList(), PublicIp = _publicIp.Checked,
             InstanceProfile = profile?.Id ?? "", KeyName = key, DiskGb = (int)_diskGb.Value,
             DiskType = _diskType.SelectedItem as string ?? "gp3", Name = name, Tags = tags,
