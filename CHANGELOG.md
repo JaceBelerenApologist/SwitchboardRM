@@ -3,6 +3,56 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.0.0 (2026-11-13)
+
+- Microsoft sign-in is built in, and is now the only Microsoft sign-in: Switchboard's own sign-in window, on
+  Microsoft's WebView2 engine (kept up to date by Windows). aws-azure-login, Node.js and Puppeteer's Chromium are no
+  longer used or bundled, along with the login-hint shim they needed; the "built-in sign-in (preview)" setting is gone.
+  The release is roughly 450 MB smaller, with most of its files gone, and sign-in no longer runs a 2022 browser engine.
+- Profiles are unchanged: their settings in ~/.aws/config keep the names aws-azure-login uses, so a separately
+  installed aws-azure-login can still use them. aws-azure-login's old sign-in browser profile (~/.aws/chromium) is no
+  longer used and can be deleted.
+- Still bundled: the Session Manager plugin, the AWS CLI (SSO sign-in, and aws commands in Switchboard's shells) and
+  Microsoft ConPTY. Settings > About lists them, plus the WebView2 version Microsoft sign-in uses.
+- collect-tools.ps1 no longer collects Node.js, aws-azure-login or Chromium, and removes their old folders from tools\;
+  update-tools.ps1 no longer checks them; the GitHub build no longer installs them, and checks they're not in the
+  release.
+
+## 2.21.2 (2026-11-12)
+
+- The AWS servers tab's tooltips show each server's instance ID and region, under its name.
+
+## 2.21.1 (2026-11-12)
+
+- Edit profile: a button next to Add and Remove in Settings > AWS profile, and in the AWS menu, opening the selected
+  profile's sign-in settings (it replaces the separate Sign-in settings section).
+- Fixed: the profile list and its buttons no longer make Settings > AWS profile scroll sideways. The list now spans
+  the page, with Edit, Add and Remove underneath it.
+
+## 2.21.0 (2026-11-12)
+
+- Profile setup is now entirely in the app, with no terminal windows. Add profile asks for a name and sign-in type,
+  then shows that type's settings form; AWS > Profile sign-in settings, Settings > AWS profile > Sign-in settings and
+  the "not set up yet" prompt open the same forms for an existing profile.
+- Microsoft profiles: tenant ID, app ID URI, account, AWS region, session length, default role and "stay signed in",
+  written to ~/.aws/config under the same names aws-azure-login uses, so both sign-ins can use the profile. A new
+  profile is filled in from an existing Microsoft profile on the PC. Check sign-in tries the settings in the built-in
+  sign-in window (no keys saved) and lists the AWS roles the account has, to pick the default from.
+- SSO profiles: start URL, SSO region, account ID, role (permission set) and AWS region, in the standard form the AWS
+  CLI and SDKs read. Sign-in still uses "aws sso login".
+- Only the profile's own settings change in ~/.aws/config; everything else in the file is kept as it was.
+
+## 2.20.0 (2026-11-12)
+
+- Built-in Microsoft sign-in (preview), in Settings > AWS profile: signs in with Switchboard's own sign-in window,
+  using Microsoft's WebView2 browser engine (kept up to date by Windows), instead of aws-azure-login and its 2022
+  Chromium. It reads the same profile settings in ~/.aws/config (tenant, app ID, account, default role, duration,
+  region) and writes the same AWS keys to ~/.aws/credentials, so the rest of Switchboard works unchanged and you can
+  switch back at any time. Its sign-in window has a private profile ("stay signed in" is remembered there for
+  background renewals), doesn't use the Windows account, and catches Microsoft's hand-off to AWS before anything
+  loads, so it can't go on to the AWS console. Several AWS roles: the profile's default, otherwise you choose. Each
+  step is in the log. aws-azure-login stays the default for now; SSO profiles are unaffected.
+
 ## 2.19.0 (2026-11-11)
 
 - An installer: releases now include SwitchboardRM-Setup-<version>.exe (signed, like the app) alongside the zip. It

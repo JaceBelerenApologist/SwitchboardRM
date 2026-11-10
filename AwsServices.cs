@@ -68,7 +68,7 @@ internal static class Aws
         return names.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    /// <summary>True when the profile signs in through IAM Identity Center (aws sso login) rather than aws-azure-login.</summary>
+    /// <summary>True when the profile signs in through IAM Identity Center (aws sso login) rather than Microsoft sign-in.</summary>
     public static bool IsSsoProfile(string profile)
     {
         try
@@ -122,50 +122,6 @@ internal static class Aws
         return null;
     }
 
-    /// <summary>
-    /// Turn on aws-azure-login's "stay logged in" for this profile (azure_default_remember_me = true in ~/.aws/config),
-    /// so it keeps the Microsoft session and can renew AWS keys later without a window. Returns true if it changed anything.
-    /// </summary>
-    public static bool EnsureRememberMe(string profile)
-    {
-        try
-        {
-            string path = Environment.GetEnvironmentVariable("AWS_CONFIG_FILE");
-            if (string.IsNullOrWhiteSpace(path))
-                path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".aws", "config");
-            if (!File.Exists(path)) return false;
-
-            string name = Name(profile);
-            string header = name == "default" ? "[default]" : $"[profile {name}]";
-            var lines = File.ReadAllLines(path).ToList();
-            int start = lines.FindIndex(l => string.Equals(l.Trim(), header, StringComparison.OrdinalIgnoreCase));
-            if (start < 0) return false;
-
-            int end = start + 1;
-            while (end < lines.Count && !lines[end].TrimStart().StartsWith('[')) end++;
-
-            for (int i = start + 1; i < end; i++)
-            {
-                int eq = lines[i].IndexOf('=');
-                if (eq <= 0 || !string.Equals(lines[i][..eq].Trim(), "azure_default_remember_me", StringComparison.OrdinalIgnoreCase))
-                    continue;
-                if (string.Equals(lines[i][(eq + 1)..].Trim(), "true", StringComparison.OrdinalIgnoreCase)) return false;
-                lines[i] = "azure_default_remember_me = true";
-                File.WriteAllLines(path, lines);
-                return true;
-            }
-
-            lines.Insert(start + 1, "azure_default_remember_me = true");
-            File.WriteAllLines(path, lines);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Log.Write("Could not turn on stay-logged-in: " + ex.Message);
-            return false;
-        }
-    }
-
     /// <summary>One AWS region for the Settings list, e.g. ("ca-central-1", "Canada", "Central").</summary>
     public sealed record RegionInfo(string Code, string Group, string Place);
 
@@ -216,7 +172,7 @@ internal static class Aws
             .ToList();
     }
 
-    /// <summary>The profile's azure_default_username in ~/.aws/config (the account aws-azure-login signs in), or "".</summary>
+    /// <summary>The profile's azure_default_username in ~/.aws/config (the account Microsoft sign-in uses), or "".</summary>
     public static string AzureDefaultUsername(string profile) => ConfigValue(profile, "azure_default_username");
 
     /// <summary>
@@ -342,6 +298,109 @@ internal static class Aws
         if (removed == 0) return $"{name} had no keys to remove";
         File.WriteAllLines(path, kept);
         return $"removed {name}'s AWS keys from {path}";
+    }
+
+    /// <summary>
+    /// Put a profile's keys in ~/.aws/credentials, the way aws-azure-login does (its [name] section, these keys only):
+    /// any previous keys and expiry there are replaced, everything else in the file is left as it is. Written via a
+    /// temporary file, so a failure can't leave the file half-written.
+    /// </summary>
+    public static void SetCredentials(string profile, IDictionary<string, string> values)
+    {
+        string name = Name(profile);
+        string path = CredentialsPath;
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "aws_access_key_id", "aws_secret_access_key", "aws_session_token", "aws_security_token",
+            "aws_expiration", "aws_session_expiration", "expiration",
+        };
+        var lines = File.Exists(path) ? File.ReadAllLines(path).ToList() : new List<string>();
+        var output = new List<string>();
+        bool inSection = false, written = false;
+        var fresh = values.Select(kv => $"{kv.Key} = {kv.Value}").ToList();
+
+        foreach (var raw in lines)
+        {
+            string line = raw.Trim();
+            if (line.StartsWith('[') && line.EndsWith(']'))
+            {
+                inSection = string.Equals(line[1..^1].Trim(), name, StringComparison.OrdinalIgnoreCase);
+                output.Add(raw);
+                if (inSection && !written) { output.AddRange(fresh); written = true; }
+                continue;
+            }
+            if (inSection && line.IndexOf('=') is > 0 and var eq && keys.Contains(line[..eq].Trim())) continue;   // old keys
+            output.Add(raw);
+        }
+        if (!written)
+        {
+            if (output.Count > 0 && output[^1].Trim().Length > 0) output.Add("");
+            output.Add($"[{name}]");
+            output.AddRange(fresh);
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        string temp = path + ".switchboard-tmp";
+        File.WriteAllLines(temp, output);
+        File.Move(temp, path, overwrite: true);
+    }
+
+    /// <summary>
+    /// Set a profile's settings in ~/.aws/config ([profile name], or [default]), the way aws-azure-login's setup does:
+    /// existing keys are updated where they are, new ones added at the end of the section, and keys given an empty
+    /// value removed. Other keys, sections and comments are left as they are. Written via a temporary file.
+    /// </summary>
+    public static void SetConfigValues(string profile, IDictionary<string, string> values)
+    {
+        string name = Name(profile);
+        string header = name.Equals("default", StringComparison.OrdinalIgnoreCase) ? "default" : "profile " + name;
+        string path = ConfigPath;
+        var lines = File.Exists(path) ? File.ReadAllLines(path).ToList() : new List<string>();
+        var pending = new Dictionary<string, string>(values, StringComparer.OrdinalIgnoreCase);
+        var output = new List<string>();
+        bool inSection = false, found = false;
+
+        void FlushPending()
+        {
+            // the section's new keys go after its last non-blank line
+            int at = output.Count;
+            while (at > 0 && output[at - 1].Trim().Length == 0) at--;
+            output.InsertRange(at, pending.Where(kv => !string.IsNullOrEmpty(kv.Value)).Select(kv => $"{kv.Key} = {kv.Value}"));
+            pending.Clear();
+        }
+
+        foreach (var raw in lines)
+        {
+            string line = raw.Trim();
+            if (line.StartsWith('[') && line.EndsWith(']'))
+            {
+                if (inSection) FlushPending();
+                inSection = System.Text.RegularExpressions.Regex.Replace(line[1..^1].Trim(), @"\s+", " ")
+                    .Equals(header, StringComparison.OrdinalIgnoreCase);
+                found |= inSection;
+                output.Add(raw);
+                continue;
+            }
+            if (inSection && line.IndexOf('=') is > 0 and var eq && pending.TryGetValue(line[..eq].Trim(), out var value))
+            {
+                pending.Remove(line[..eq].Trim());
+                if (!string.IsNullOrEmpty(value)) output.Add($"{line[..eq].Trim()} = {value}");
+                continue;   // an empty value removes the key
+            }
+            output.Add(raw);
+        }
+        if (inSection) FlushPending();
+        if (!found)
+        {
+            if (output.Count > 0 && output[^1].Trim().Length > 0) output.Add("");
+            output.Add($"[{header}]");
+            output.AddRange(pending.Where(kv => !string.IsNullOrEmpty(kv.Value)).Select(kv => $"{kv.Key} = {kv.Value}"));
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        string temp = path + ".switchboard-tmp";
+        File.WriteAllLines(temp, output);
+        File.Move(temp, path, overwrite: true);
     }
 
     public static RegionEndpoint Region(string region) => RegionEndpoint.GetBySystemName(region);

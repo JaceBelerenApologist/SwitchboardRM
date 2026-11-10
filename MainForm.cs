@@ -340,11 +340,11 @@ internal sealed class MainForm : Form
         var aws = new ToolStripMenuItem("&AWS");
         aws.DropDownItems.Add(new ToolStripMenuItem("&Sign in...", null, async (_, _) => await SignInAsync()));
         aws.DropDownItems.Add(new ToolStripMenuItem("Sign &out", null, async (_, _) => await SignOutNowAsync()));
+        aws.DropDownItems.Add(new ToolStripMenuItem("&Edit profile ...", null, (_, _) => ProfileSetup.Edit(this, Profile)));
         aws.DropDownItems.Add(new ToolStripMenuItem("&Add profile ...", null, (_, _) => AddProfile()));
         aws.DropDownItems.Add(new ToolStripMenuItem("&Remove profile ...", null, async (_, _) => await RemoveCurrentProfileAsync()));
         aws.DropDownItems.Add(_miKeepSignedIn);
         aws.DropDownOpening += (_, _) => _miKeepSignedIn.Checked = _settings.KeepSignedIn;
-        aws.DropDownItems.Add(new ToolStripMenuItem("Set &up Microsoft sign-in...", null, (_, _) => SignInSetup.Run(Profile, this)));
         aws.DropDownItems.Add(new ToolStripSeparator());
         aws.DropDownItems.Add(new ToolStripMenuItem("&Profile settings...", null, async (_, _) => await OpenSettingsAsync(SettingsForm.Page.Profile)));
         aws.DropDownItems.Add(new ToolStripMenuItem("&RDP credentials...", null, async (_, _) => await OpenSettingsAsync(SettingsForm.Page.Credentials)));
@@ -936,11 +936,14 @@ internal sealed class MainForm : Form
         if (!known.Contains(profile, StringComparer.OrdinalIgnoreCase))
         {
             SetBusy(false, null);
-            if (Ask($"'{profile}' isn't set up for Microsoft sign-in yet. Set it up now?")) SignInSetup.Run(profile, this);
+            if (Ask($"'{profile}' isn't set up for Microsoft sign-in yet. Set it up now?") && ProfileSetup.Edit(this, profile))
+                await SignInAsync();   // set up: sign in straight away
             return;
         }
 
-        SetBusy(true, "Signing in: finish the Microsoft sign-in in the browser window that opened (check the taskbar if you can't see it) ...");
+        SetBusy(true, Aws.IsSsoProfile(profile)
+            ? "Signing in: finish the SSO sign-in in your browser ..."
+            : "Signing in: finish the Microsoft sign-in in the sign-in window ...");
         _cts = new CancellationTokenSource();
         _btnCancel.Visible = true;
         bool cancelled = false;
@@ -949,12 +952,10 @@ internal sealed class MainForm : Form
         try
         {
             bool isSso = Aws.IsSsoProfile(profile);
-            if (!isSso && _settings.KeepSignedIn && Aws.EnsureRememberMe(profile))
-                Log.Write($"Turned on 'stay logged in' for {profile} so the sign-in can be renewed automatically");
 
             var r = isSso
                 ? await Cli.RunAsync(Tools.AwsCli, new[] { "sso", "login", "--profile", profile }, _cts.Token)
-                : await RunAzureLoginAsync(_cts.Token, profile, "--mode", "gui");
+                : await MicrosoftSignInAsync(_cts.Token, profile, interactive: true);
             Log.Write($"Sign-in finished with code {r.Code}\n{r.Out}\n{r.Err}");
 
             if (r.Code == -2) cancelled = true;
@@ -1363,7 +1364,7 @@ internal sealed class MainForm : Form
     {
         var env = new Dictionary<string, string>();
         if (Profile.Length > 0) env["AWS_PROFILE"] = Profile;
-        var toolDirs = new[] { "aws-cli", "session-manager-plugin", "node" }
+        var toolDirs = new[] { "aws-cli", "session-manager-plugin" }
             .Select(d => Path.Combine(Tools.Dir, d)).Where(Directory.Exists).ToList();
         if (toolDirs.Count > 0)
             env["PATH"] = string.Join(";", toolDirs) + ";" + (Environment.GetEnvironmentVariable("PATH") ?? "");
@@ -1830,44 +1831,12 @@ internal sealed class MainForm : Form
         else UpdateAuthDisplay();
     }
 
-    /// <summary>aws-azure-login from the bundled tools folder if it's there, otherwise the installed one.</summary>
     /// <summary>
-    /// Run aws-azure-login for a profile, asking Entra for the profile's own account (azure_default_username)
-    /// via login_hint, so it doesn't silently use the account signed in to Windows. The log says whether it applied.
+    /// Microsoft sign-in for a profile, with the built-in sign-in window (EntraSignIn). interactive = Sign in from the
+    /// toolbar; otherwise a background renewal in a hidden window, which can't ask anything.
     /// </summary>
-    private static async Task<(int Code, string Out, string Err)> RunAzureLoginAsync(CancellationToken ct, string profile,
-        params string[] extraArgs)
-    {
-        string hint = Aws.AzureDefaultUsername(profile);
-        Log.Write(hint.Length > 0
-            ? $"Sign-in for {profile}: asking Entra for {hint} (login_hint)"
-            : $"Sign-in for {profile}: no azure_default_username in ~/.aws/config, so no account hint is sent");
-
-        // only ever Puppeteer's own Chromium: if it isn't there, say so rather than open any other browser
-        string browserProblem = Tools.SignInBrowserProblem();
-        if (browserProblem != null)
-        {
-            Log.Write("Sign-in not started: " + browserProblem.Replace("\n", " "));
-            return (1, "", browserProblem);
-        }
-
-        var args = new List<string> { "--profile", profile };
-        args.AddRange(extraArgs);
-        var (file, list, env) = Tools.AzureLogin(hint, args.ToArray());
-        var r = await Cli.RunAsync(file, list, ct, env);
-
-        // the shim reports each time it adds the hint
-        string output = (r.Out ?? "") + "\n" + (r.Err ?? "");
-        bool applied = false;
-        foreach (var line in output.Split('\n').Where(l => l.Contains("[switchboard]")))
-        {
-            Log.Write("aws-azure-login: " + line.Trim());
-            applied |= line.Contains("login_hint=");
-        }
-        if (hint.Length > 0 && !applied && r.Code != -2)
-            Log.Write("The login hint wasn't applied: aws-azure-login didn't open the Microsoft page the way the shim expects.");
-        return r;
-    }
+    private Task<(int Code, string Out, string Err)> MicrosoftSignInAsync(CancellationToken ct, string profile, bool interactive) =>
+        EntraSignIn.RunAsync(this, profile, interactive, ct);
 
     // ---------------------------------------------------------------- locked / asleep
 
@@ -2002,7 +1971,7 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>
-    /// Renew the AWS keys in the background with aws-azure-login's saved Microsoft session: no window, no typing.
+    /// Renew the AWS keys in the background with the sign-in window's remembered Microsoft session: no window shown, no typing.
     /// If Microsoft wants a fresh sign-in (MFA, password change, policy), it fails quietly and the user clicks Sign in.
     /// </summary>
     /// <summary>
@@ -2054,7 +2023,7 @@ internal sealed class MainForm : Form
         using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90)))
         {
             _renewCts = cts;
-            try { r = await RunAzureLoginAsync(cts.Token, profile, "--no-prompt"); }
+            try { r = await MicrosoftSignInAsync(cts.Token, profile, interactive: false); }
             finally { _renewCts = null; }
         }
         Log.Write($"Background renewal finished with code {r.Code}\n{r.Out}\n{r.Err}");
@@ -2641,7 +2610,8 @@ internal sealed class MainForm : Form
           $"Signs in as: {CellText(i, "User")}" +
           (string.IsNullOrWhiteSpace(i.Saved.Description) ? "" : "\n\n" + i.Saved.Description)
         : 
-        $"{i.Name}\n{i.Type}  {i.OsFull}\nStatus: {StatusOf(i)}" +
+        $"{i.Name}\nInstance ID: {i.Id}" + (string.IsNullOrEmpty(i.Region) ? "" : $"   Region: {i.Region}") +
+        $"\n{i.Type}  {i.OsFull}\nStatus: {StatusOf(i)}" +
         $"\nEC2 state: {(i.State.Length > 0 ? i.State : "n/a")}   Systems Manager: {(i.Managed ? i.Ping : "not managed")}" +
         (i.Tags.Length > 0 ? "\n" + i.Tags.Replace("; ", "\n") : "");
 

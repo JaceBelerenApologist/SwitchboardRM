@@ -11,7 +11,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <!-- Version: bump this for each release (PATCH = fixes, MINOR = features, MAJOR = breaking changes)
          and add a section to CHANGELOG.md. Shown on Settings > About and in the .exe's Properties > Details. -->
-    <Version>2.19.0</Version>
+    <Version>3.0.0</Version>
     <Product>Switchboard Remote Manager</Product>
     <Copyright>© 2026 Nick Morrissey</Copyright>
     <Description>Switchboard Remote Manager</Description>
@@ -28,8 +28,6 @@
     <EmbeddedResource Include="Assets\app.ico" LogicalName="SwitchboardRM.app.ico" />
     <EmbeddedResource Include="Assets\app.png" LogicalName="SwitchboardRM.app.png" />
     <EmbeddedResource Include="CHANGELOG.md" LogicalName="SwitchboardRM.CHANGELOG.md" />
-    <!-- adds Entra's login_hint to aws-azure-login's sign-in page (see Tools.AzureLogin) -->
-    <EmbeddedResource Include="Assets\login-hint-shim.js" LogicalName="SwitchboardRM.login-hint-shim.js" />
     <!-- the SSH terminal page: xterm.js 5.5.0 + fit add-on 0.10.0 (MIT, see Assets\terminal\LICENSE-xterm.txt) -->
     <EmbeddedResource Include="Assets\terminal\terminal.html" LogicalName="SwitchboardRM.terminal.terminal.html" />
     <EmbeddedResource Include="Assets\terminal\xterm.js" LogicalName="SwitchboardRM.terminal.xterm.js" />
@@ -43,7 +41,7 @@
       output\
         SwitchboardRM.exe      the app, the AWS SDK and the .NET runtime in one file: nothing to install
         tools\                 the bundled helpers from the project's tools\ folder, same layout
-          node\  aws-azure-login\  session-manager-plugin\  aws-cli\  ...
+          session-manager-plugin\  aws-cli\  conpty\  ...
   -->
   <PropertyGroup>
     <PublishDir>$(MSBuildProjectDirectory)\output\</PublishDir>

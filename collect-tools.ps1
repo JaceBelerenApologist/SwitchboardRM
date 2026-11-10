@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
   Copies the helper programs installed on THIS PC into .\tools, together with their licence files and
-  third-party notices, so Switchboard can be distributed with them and other PCs don't need Node.js, npm,
-  aws-azure-login, the Session Manager plugin or the AWS CLI installed.
+  third-party notices, so Switchboard can be distributed with them and other PCs don't need the Session Manager
+  plugin or the AWS CLI installed. Microsoft sign-in is built into Switchboard and needs nothing from here.
 
 .DESCRIPTION
   Run it from the project folder on a PC where the tools are installed and working (see the README,
@@ -12,11 +12,8 @@
 
   Result:
       tools\THIRD-PARTY-NOTICES.txt           what's bundled: versions, licences, sources
-      tools\node\                             node.exe + Node's LICENSE (covers what's built into node.exe)
-      tools\aws-azure-login\                  the package + node_modules; THIRD-PARTY-NOTICES.txt lists every
-                                              package with its version, licence and licence text
       tools\session-manager-plugin\           the plugin + its LICENSE / NOTICE
-      tools\aws-cli\                          AWS CLI v2 (only used by SSO profiles) + its licence files
+      tools\aws-cli\                          AWS CLI v2 (SSO sign-in, and aws commands in Switchboard's shells)
       tools\openssh\                          only if you put an OpenSSH build there yourself (left untouched)
       tools\conpty\                           Microsoft's ConPTY (conpty.dll + OpenConsole.exe, from the Windows
                                               Terminal project), downloaded from NuGet: lets Windows sign-in
@@ -26,8 +23,8 @@
   The tools stay in .\tools and Switchboard uses them from there while you develop; publishing copies .\tools
   next to SwitchboardRM.exe with the same layout. Re-run this after updating any of the tools.
 
-  Puppeteer's own Chromium, inside aws-azure-login, is the only browser Switchboard signs in with: collecting stops
-  with an error if it's missing or incomplete, so a bundle without it can't be made.
+  Folders from tools that are no longer bundled (node, aws-azure-login, chromium: Microsoft sign-in used to need them)
+  are removed.
 #>
 param()
 
@@ -62,127 +59,23 @@ function Ensure-Licence([string]$dir, [string]$tool, [string]$licence, [string]$
     return 'LICENSE-NOTE.txt'
 }
 
-# Puppeteer's own Chromium, inside an aws-azure-login folder. npm can skip Puppeteer's download script (newer npm only
-# runs allowed install scripts), and Puppeteer's downloader skips any build whose folder exists, even empty: so
-# download the exact build Puppeteer expects ourselves, from the same address, into the same place.
-function Repair-PuppeteerChromium([string]$packageDir) {
-    $puppeteer = Join-Path $packageDir 'node_modules\puppeteer'
-    $local = Join-Path $puppeteer '.local-chromium'
-    if (Get-ChildItem $local -Recurse -Filter chrome.exe -ErrorAction SilentlyContinue) { return }
-
-    $revisions = Join-Path $puppeteer 'lib\cjs\puppeteer\revisions.js'
-    $revision = if (Test-Path $revisions) { [regex]::Match((Get-Content $revisions -Raw), "chromium:\s*'(\d+)'").Groups[1].Value }
-    if (-not $revision) { throw "Couldn't tell which Chromium build Puppeteer needs (no $revisions)." }
-
-    Write-Host "Puppeteer's Chromium is missing or incomplete; downloading Chromium build $revision for it ..."
-    $zip = Join-Path $env:TEMP "switchboard-chromium-$revision.zip"
-    $previous = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'   # the progress bar makes it far slower
-    try {
-        Invoke-WebRequest "https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/$revision/chrome-win.zip" -OutFile $zip -UseBasicParsing
-        $target = Join-Path $local "win64-$revision"            # where Puppeteer 13 looks: <this>\chrome-win\chrome.exe
-        if (Test-Path $target) { Remove-Item $target -Recurse -Force }
-        New-Item -ItemType Directory -Force $target | Out-Null
-        Expand-Archive $zip $target -Force
-    } finally {
-        $ProgressPreference = $previous
-        Remove-Item $zip -ErrorAction SilentlyContinue
-    }
-}
-
 function Add-Summary($tool, $version, $licence, $source, $folder, $files) {
     $summary.Add([pscustomobject]@{ Tool = $tool; Version = $version; Licence = $licence; Source = $source; Folder = $folder; Files = $files })
 }
 
 New-Item -ItemType Directory -Force $root | Out-Null
 
-# ---------------------------------------------------------------- 1. Node.js
-# Only node.exe is needed to run aws-azure-login (npm is just the installer). Node's LICENSE file also covers
-# everything built into node.exe (OpenSSL, ICU, V8, libuv, ...).
-$node = (Get-Command node -ErrorAction SilentlyContinue).Source
-if (-not $node) { throw 'node.exe was not found on PATH. Install Node.js LTS on this PC and run again (see the README).' }
-$nodeDir = Join-Path $root 'node'
-if (Test-Path $nodeDir) { Remove-Item $nodeDir -Recurse -Force }
-New-Item -ItemType Directory -Force $nodeDir | Out-Null
-Copy-Item $node $nodeDir -Force
-Copy-Licenses (Split-Path $node) $nodeDir
-$nodeVersion = (& $node --version).Trim()
-$files = Ensure-Licence $nodeDir 'Node.js' 'MIT License (with the licences of its bundled components)' 'https://github.com/nodejs/node/blob/main/LICENSE'
-Add-Summary 'Node.js' $nodeVersion 'MIT (+ bundled components)' 'https://nodejs.org' 'node\' $files
-Write-Host "Node.js $nodeVersion  ->  tools\node"
-
-# ---------------------------------------------------------------- 2. aws-azure-login and its packages
-$npmRoot = (& npm root -g).Trim()
-$aal = Join-Path $npmRoot 'aws-azure-login'
-if (-not (Test-Path $aal)) { throw "aws-azure-login was not found in $npmRoot. Run: npm install -g aws-azure-login" }
-$aalDir = Join-Path $root 'aws-azure-login'
-Copy-Tree $aal $aalDir
-$aalVersion = (Get-Content (Join-Path $aal 'package.json') -Raw | ConvertFrom-Json).version
-
-# Every package (aws-azure-login itself and everything under node_modules): name, version, licence, licence text.
-$packages = @{}
-Get-ChildItem $aalDir -Recurse -Filter package.json -File -ErrorAction SilentlyContinue | ForEach-Object {
-    try { $pkg = Get-Content $_.FullName -Raw | ConvertFrom-Json } catch { return }
-    if (-not $pkg.name -or -not $pkg.version) { return }   # helper package.json files that aren't packages
-    $key = "$($pkg.name)@$($pkg.version)"
-    if ($packages.ContainsKey($key)) { return }
-    $licence = $null
-    if ($pkg.license -is [string]) { $licence = $pkg.license }
-    elseif ($pkg.license.type) { $licence = $pkg.license.type }
-    elseif ($pkg.licenses) { $licence = (@($pkg.licenses) | ForEach-Object { $_.type }) -join ' OR ' }
-    if (-not $licence) { $licence = 'not stated' }
-    $text = Get-ChildItem $_.DirectoryName -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -match '^(LICEN[CS]E|COPYING|NOTICE)' } |
-        ForEach-Object { "--- $($_.Name) ---`r`n" + (Get-Content $_.FullName -Raw) }
-    $packages[$key] = [pscustomobject]@{ Key = $key; Licence = $licence; Text = ($text -join "`r`n") }
-}
-$sorted = $packages.Values | Sort-Object Key
-$out = New-Object System.Text.StringBuilder
-[void]$out.AppendLine("Third-party notices for aws-azure-login $aalVersion and the packages it uses")
-[void]$out.AppendLine("Generated by collect-tools.ps1 on $(Get-Date -Format yyyy-MM-dd). $($sorted.Count) packages.")
-[void]$out.AppendLine('')
-[void]$out.AppendLine('Licences used:')
-$sorted | Group-Object Licence | Sort-Object Count -Descending | ForEach-Object {
-    [void]$out.AppendLine(('  {0,-30} {1} package(s)' -f $_.Name, $_.Count))
-}
-[void]$out.AppendLine('')
-[void]$out.AppendLine('Packages:')
-foreach ($p in $sorted) { [void]$out.AppendLine(('  {0,-55} {1}' -f $p.Key, $p.Licence)) }
-[void]$out.AppendLine('')
-[void]$out.AppendLine('Licence texts (as included with each package):')
-foreach ($p in $sorted) {
-    [void]$out.AppendLine('')
-    [void]$out.AppendLine(('=' * 100))
-    [void]$out.AppendLine("$($p.Key)  ($($p.Licence))")
-    [void]$out.AppendLine(('=' * 100))
-    if ($p.Text) { [void]$out.AppendLine($p.Text) }
-    else { [void]$out.AppendLine("(no licence file in the package; see https://www.npmjs.com/package/$($p.Key.Substring(0, $p.Key.LastIndexOf('@'))))") }
-}
-Set-Content -Path (Join-Path $aalDir 'THIRD-PARTY-NOTICES.txt') -Encoding UTF8 -Value $out.ToString()
-$noText = @($sorted | Where-Object { -not $_.Text }).Count
-# Puppeteer's own Chromium is the only sign-in browser: fetch it if it's missing, then it must be there, complete
-Repair-PuppeteerChromium $aalDir
-$localChromium = Join-Path $aalDir 'node_modules\puppeteer\.local-chromium'
-$chromeExe = Get-ChildItem $localChromium -Recurse -Filter chrome.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $chromeExe) {
-    throw ("aws-azure-login has no complete Puppeteer Chromium (" + $(if (Test-Path $localChromium) { 'chrome.exe is missing' } else { 'node_modules\puppeteer\.local-chromium is missing' }) +
-           ") and downloading it failed. Switchboard signs in with nothing else; check the download above, then run this again.")
-}
-$chromeVersion = $chromeExe.VersionInfo.ProductVersion
-$chromeFiles = Ensure-Licence $chromeExe.DirectoryName 'Chromium' 'BSD 3-Clause licence (with the licences of its many bundled components, listed at chrome://credits)' 'https://chromium.googlesource.com/chromium/src/+/main/LICENSE'
-Add-Summary "Chromium (Puppeteer's, the sign-in browser)" $chromeVersion 'BSD-3-Clause (+ components)' 'https://www.chromium.org' ('aws-azure-login\' + $chromeExe.DirectoryName.Substring($aalDir.Length + 1) + '\') $chromeFiles
-Add-Summary 'aws-azure-login' $aalVersion 'MIT (packages: see its notices)' 'https://github.com/aws-azure-login/aws-azure-login' 'aws-azure-login\' 'LICENSE, THIRD-PARTY-NOTICES.txt'
-Write-Host "aws-azure-login $aalVersion ($($sorted.Count) packages)  ->  tools\aws-azure-login"
-if ($noText -gt 0) { Write-Host "  $noText package(s) have no licence file of their own; the notices name their licence and npm page." }
-
-# ---------------------------------------------------------------- 3. (no separate Chromium any more)
-# Puppeteer's own Chromium inside aws-azure-login is the sign-in browser; an old tools\chromium is removed.
-$chromiumDir = Join-Path $root 'chromium'
-if (Test-Path $chromiumDir) {
-    Remove-Item $chromiumDir -Recurse -Force
-    Write-Host 'Removed tools\chromium (sign-in uses the Chromium inside aws-azure-login).'
+# ---------------------------------------------------------------- no longer bundled
+# Microsoft sign-in is built into Switchboard now: Node.js, aws-azure-login and Chromium aren't needed any more
+foreach ($old in 'node', 'aws-azure-login', 'chromium') {
+    $dir = Join-Path $root $old
+    if (Test-Path $dir) {
+        Remove-Item $dir -Recurse -Force
+        Write-Host "Removed tools\$old (no longer needed: Microsoft sign-in is built in)."
+    }
 }
 
-# ---------------------------------------------------------------- 4. Session Manager plugin
+# ---------------------------------------------------------------- 1. Session Manager plugin
 $plugin = (Get-Command session-manager-plugin -ErrorAction SilentlyContinue).Source
 if (-not $plugin) {
     $default = Join-Path $env:ProgramFiles 'Amazon\SessionManagerPlugin\bin\session-manager-plugin.exe'
@@ -197,7 +90,7 @@ $files = Ensure-Licence $pluginDir 'The AWS Session Manager plugin' 'Apache Lice
 Add-Summary 'Session Manager plugin' $pluginVersion 'Apache-2.0' 'https://github.com/aws/session-manager-plugin' 'session-manager-plugin\' $files
 Write-Host "Session Manager plugin $pluginVersion  ->  tools\session-manager-plugin"
 
-# ---------------------------------------------------------------- 5. AWS CLI v2 (only for SSO profiles)
+# ---------------------------------------------------------------- 2. AWS CLI v2 (SSO sign-in, aws commands in shells)
 $aws = (Get-Command aws -ErrorAction SilentlyContinue).Source
 if (-not $aws) {
     $default = Join-Path $env:ProgramFiles 'Amazon\AWSCLIV2\aws.exe'
@@ -220,7 +113,7 @@ if ($aws) {
     Write-Warning 'AWS CLI v2 not found; skipping it (only needed for SSO profiles).'
 }
 
-# ---------------------------------------------------------------- 6. OpenSSH (only if placed there by hand)
+# ---------------------------------------------------------------- 3. OpenSSH (only if placed there by hand)
 $sshDir = Join-Path $root 'openssh'
 if (Test-Path (Join-Path $sshDir 'ssh.exe')) {
     $sshVersion = (Get-Item (Join-Path $sshDir 'ssh.exe')).VersionInfo.ProductVersion
@@ -229,7 +122,7 @@ if (Test-Path (Join-Path $sshDir 'ssh.exe')) {
     Write-Host "OpenSSH $sshVersion  (already in tools\openssh, left as is)"
 }
 
-# ---------------------------------------------------------------- 7. Microsoft ConPTY (conpty.dll + OpenConsole.exe)
+# ---------------------------------------------------------------- 4. Microsoft ConPTY (conpty.dll + OpenConsole.exe)
 # Switchboard's terminals use it, when present, so their hidden console windows can be owned by Switchboard's window:
 # that's what lets WAM sign-in windows (Connect-MgGraph, Connect-AzAccount ...) appear. Without it they still work.
 $conptyDir = Join-Path $root 'conpty'
@@ -292,8 +185,6 @@ foreach ($s in $summary) {
 $lines.Add('')
 $lines.Add('Licence files:')
 foreach ($s in $summary) { $lines.Add(('  {0,-26} {1}{2}' -f $s.Tool, $s.Folder, $s.Files)) }
-$lines.Add('')
-$lines.Add('aws-azure-login''s own dependencies are listed, with their licence texts, in aws-azure-login\THIRD-PARTY-NOTICES.txt.')
 Set-Content -Path (Join-Path $root 'THIRD-PARTY-NOTICES.txt') -Encoding UTF8 -Value $lines
 
 $mb = (Get-ChildItem $root -Recurse -File | Measure-Object Length -Sum).Sum / 1MB

@@ -50,8 +50,11 @@ ordinary RDP and SSH connections (or imports them from RDCMan, mRemoteNG, `.rdp`
 - Import from RDCMan (`.rdg`), Remote Desktop files (`.rdp`), mRemoteNG (`confCons.xml`) and PuTTY saved sessions.
 
 **Sign-in**
-- Microsoft Entra ID sign-in through [aws-azure-login](https://github.com/aws-azure-login/aws-azure-login), or AWS
-  IAM Identity Center (SSO) profiles.
+- Microsoft Entra ID sign-in built in: a sign-in window on Microsoft's WebView2 engine (kept up to date by Windows),
+  which signs in with the profile's account and gets temporary AWS keys through STS. Or AWS IAM Identity Center (SSO)
+  profiles.
+- Profiles set up and edited in the app (Add / Edit profile): tenant, AWS app, account, region, session length and
+  default role, with Check sign-in to list the account's AWS roles.
 - Sign-in status with time remaining, optional background renewal ("Keep me signed in"), paused while Windows is
   locked or asleep.
 - Asks Entra for each profile's own account (`login_hint`), so a separate admin account isn't swapped for the
@@ -75,10 +78,10 @@ ordinary RDP and SSH connections (or imports them from RDCMan, mRemoteNG, `.rdp`
 
 **To run the published app**
 - Windows 10 or 11, x64.
-- The Microsoft Edge WebView2 Runtime, for the SSH terminal only (included with Windows 10/11).
+- The Microsoft Edge WebView2 Runtime, for Microsoft sign-in and the terminals (included with Windows 10/11).
 - The OpenSSH Client, for SSH only (Windows Settings > Apps > Optional features), unless bundled in `tools\openssh\`.
-- Node.js, aws-azure-login, the Session Manager plugin and the AWS CLI: included in the release download, or
-  installed yourself (see [Installation](#installation)).
+- The Session Manager plugin and the AWS CLI: included in the release download, or installed yourself (see
+  [Installation](#installation)).
 
 **To build**
 - The [.NET 10 SDK](https://dotnet.microsoft.com/download).
@@ -106,12 +109,12 @@ and install the helper tools it uses.
 
 1. Download `SwitchboardRM-<version>.zip` from [Releases](../../releases) and extract it anywhere, for example
    `C:\Tools\SwitchboardRM`. Keep the `tools` folder next to `SwitchboardRM.exe`.
-2. Run `SwitchboardRM.exe`. It isn't code-signed, so Windows SmartScreen may ask you to confirm the first time
-   (**More info > Run anyway**).
+2. Run `SwitchboardRM.exe`. Releases are code-signed with an organisational certificate; on PCs that don't trust it,
+   Windows SmartScreen may ask you to confirm the first time (**More info > Run anyway**).
 3. Set up an AWS profile and sign in (see [First-time sign-in setup](#first-time-sign-in-setup)).
 
-The release bundles Node.js, aws-azure-login, the Session Manager plugin and the AWS CLI in `tools\`, so nothing else
-needs installing. What's included, with versions and licences, is listed in `tools\THIRD-PARTY-NOTICES.txt`.
+The release bundles the Session Manager plugin, the AWS CLI and Microsoft ConPTY in `tools\`, so nothing else needs
+installing. What's included, with versions and licences, is listed in `tools\THIRD-PARTY-NOTICES.txt`.
 
 ### Option B: build it and install the helper tools yourself
 
@@ -128,10 +131,9 @@ cd SwitchboardRM
 | Tool | Needed for | How to install |
 |---|---|---|
 | AWS Session Manager plugin | every AWS connection | Install it with the Windows installer from AWS: [Install the Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/install-plugin-windows.html). Check with `session-manager-plugin --version`. |
-| Node.js (LTS) | Microsoft Entra sign-in | Install from [nodejs.org](https://nodejs.org). Then, in a **new** terminal, `npm install -g aws-azure-login` and check with `aws-azure-login --version`. Installing it also downloads a browser for Puppeteer into `%USERPROFILE%\.cache\puppeteer`. |
-| AWS CLI v2 | IAM Identity Center (SSO) profiles only | Install with the Windows installer: [Install the AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html). |
+| AWS CLI v2 | IAM Identity Center (SSO) profiles, and `aws` in Switchboard's shells | Install with the Windows installer: [Install the AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html). |
 | OpenSSH Client | SSH sessions only | Usually already present. If not: Windows Settings > System > Optional features > OpenSSH Client, or `Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0` in an admin PowerShell. |
-| WebView2 Runtime | SSH sessions only | Included with Windows 10/11. If missing, install the Evergreen runtime from Microsoft's WebView2 page. |
+| WebView2 Runtime | Microsoft sign-in and the terminals | Included with Windows 10/11. If missing, install the Evergreen runtime from Microsoft's WebView2 page. |
 
 **3. Run** `output\SwitchboardRM.exe` and continue with the first-time sign-in setup below.
 
@@ -140,22 +142,25 @@ For development, open the folder in Visual Studio or VS Code and run it (`dotnet
 ### First-time sign-in setup
 
 Existing profiles in `~/.aws` are picked up automatically. To add one, use **Add profile** (bottom of the profile
-list on the toolbar, Settings > AWS profile, or the AWS menu):
+list on the toolbar, Settings > AWS profile, or the AWS menu); **Edit profile** changes an existing one. Everything is
+set up in the app:
 
-- **Microsoft sign-in (aws-azure-login)** opens a setup window that runs `aws-azure-login --configure`. Have these ready:
+- **Microsoft sign-in (Entra ID)**:
 
-  | Question | Answer |
+  | Field | What to enter |
   |---|---|
-  | Azure Tenant ID | your organisation's Microsoft Entra tenant ID (from your administrator; the window shows it if another profile on the PC already has one) |
-  | Azure App ID URI | the AWS app's identifier in Entra, usually `urn:amazon:webservices` |
-  | Default Username | the account to sign in with. Switchboard also asks Entra for this account, so a separate admin account isn't swapped for the one signed in to Windows. |
-  | Default Role ARN | blank if you only have one AWS role, otherwise the role to use |
-  | Session hours | how long a sign-in lasts (up to the maximum your AWS role allows), e.g. `1` |
-  | Stay logged in | `true`, so Switchboard can renew the sign-in in the background |
+  | Tenant ID | your organisation's Microsoft Entra tenant ID (filled in if another profile on the PC already has one) |
+  | App ID URI | the AWS app's identifier in Entra (Enterprise applications > the AWS app > Single sign-on) |
+  | Account | the account to sign in with, so a separate admin account isn't swapped for the one signed in to Windows |
+  | AWS region | where your servers are |
+  | Session length | how long a sign-in lasts, up to the maximum your AWS role allows |
+  | Default AWS role | only needed if your account has several roles: **Check sign-in** signs in and lists them |
+  | Stay signed in | on, so Switchboard can renew the sign-in in the background |
 
-- **AWS IAM Identity Center (SSO)** opens `aws configure sso` in a console window. Have your SSO start URL and region ready.
+- **AWS IAM Identity Center (SSO)**: start URL, SSO region, account ID, role (permission set) and AWS region.
 
-When the setup window is done, click **Sign in**.
+The settings are saved in `~/.aws/config` under the standard names (for Microsoft sign-in, the same ones
+aws-azure-login uses), so other AWS tools can use the profiles too. Then click **Sign in**.
 
 ## Usage notes
 
@@ -215,10 +220,12 @@ The installer is defined in `installer\SwitchboardRM.iss` (Inno Setup 6). To bui
 
 `.github/workflows/build.yml` builds Switchboard on GitHub's Windows machines. The version number decides releases:
 
-- **Push to `main`:** a full build with the helper tools bundled (checked before zipping), kept with the run
-  (Actions tab > the run > Artifacts). If `<Version>` in the `.csproj` hasn't been released yet, it also publishes the
+- **Push to `main`:** a full build with the helper tools bundled (checked before zipping). If `<Version>` in the
+  `.csproj` hasn't been released yet, it publishes the
   GitHub Release `vX.Y.Z` (creating the tag) with the installer, the zip and that version's CHANGELOG notes. An existing release is
-  never replaced: bump the version to publish a new one.
+  never replaced: bump the version to publish a new one. A build that doesn't publish a release is kept with its run
+  for 7 days instead (Actions tab > the run > Artifacts); one that does keeps no separate copy, since the release
+  holds the same files.
 - **Pull request:** compile only.
 - **Run by hand** (Actions tab > Build > Run workflow): a full build kept with the run; tick **Publish the release**
   to also release the current version, if it isn't released yet.
@@ -246,10 +253,9 @@ For maintainers who publish the ready-to-run download (Option A).
    | File or folder | Contents |
    |---|---|
    | `tools\THIRD-PARTY-NOTICES.txt` | every bundled tool with its version, licence and source, and where its licence files are |
-   | `tools\node\` | `node.exe` and Node's `LICENSE` (which also covers what's built into `node.exe`, such as OpenSSL) |
-   | `tools\aws-azure-login\` | the package and its `node_modules`; `THIRD-PARTY-NOTICES.txt` lists every package with its version, licence and licence text |
    | `tools\session-manager-plugin\` | the plugin with its `LICENSE` and `NOTICE` |
    | `tools\aws-cli\` | AWS CLI v2 with its licence files |
+   | `tools\conpty\` | Microsoft ConPTY (`conpty.dll`, `OpenConsole.exe`) from NuGet, with its licence |
    | `tools\openssh\` | only if you put an OpenSSH build there by hand; the script leaves it as is |
 
    Where a tool's installation has no licence file, the script writes a `LICENSE-NOTE.txt` naming the licence and
@@ -266,8 +272,7 @@ For maintainers who publish the ready-to-run download (Option A).
 
 ### Keeping the bundled tools up to date
 
-People who download a release run the tool versions you collected, so refresh them regularly. Node.js and Chromium
-in particular get frequent security fixes.
+People who download a release run the tool versions you collected, so refresh them regularly.
 
 `update-tools.ps1` does the checking and updating for you, then refreshes `tools\`:
 
@@ -276,20 +281,18 @@ powershell -ExecutionPolicy Bypass -File .\update-tools.ps1              # check
 powershell -ExecutionPolicy Bypass -File .\update-tools.ps1 -CheckOnly   # only report what's out of date
 ```
 
-It updates Node.js (LTS), the Session Manager plugin and the AWS CLI with winget, and aws-azure-login with npm
-(skipping npm releases less than 7 days old unless you add `-AllowRecent`), then runs `collect-tools.ps1`.
+It updates the Session Manager plugin and the AWS CLI with winget, then runs `collect-tools.ps1` (which also fetches
+the current Microsoft ConPTY).
 Publish afterwards and release it as a new PATCH version. Settings > About in the app lists the bundled versions.
 
-To do it by hand instead: install the newer Node.js LTS, run `npm update -g aws-azure-login`, install the newer
-Session Manager plugin and AWS CLI installers, then re-run `collect-tools.ps1`.
+To do it by hand instead: install the newer Session Manager plugin and AWS CLI installers, then re-run
+`collect-tools.ps1`.
 
 ### Licences of the bundled tools
 
 All of the bundled tools are open source under permissive licences that allow redistribution, provided their licence
-files go with them: Node.js (MIT, plus its components' licences), aws-azure-login (MIT) and its dependencies (MIT,
-Apache 2.0, BSD, ISC and similar), the Session Manager plugin and AWS CLI (Apache 2.0), and Chromium (BSD, plus its
-components' licences). `collect-tools.ps1` puts the licence files in each tool's folder and writes the notices. If you
-bundle Puppeteer's "Chrome for Testing" build, check Google's terms for it as well.
+files go with them: the Session Manager plugin and AWS CLI (Apache 2.0) and Microsoft ConPTY (MIT).
+`collect-tools.ps1` puts the licence files in each tool's folder and writes the notices.
 
 ## How it works
 
@@ -300,7 +303,9 @@ bundle Puppeteer's "Chrome for Testing" build, check Google's terms for it as we
 | Remote Desktop (ActiveX MsRdpClient) host | `RdpHost.cs` |
 | SSH terminal: WebView2 + xterm.js, ConPTY | `TerminalHost.cs`, `PseudoConsole.cs`, `Assets\terminal\` |
 | Saved connections and import | `Connections.cs`, `ConnectionImport.cs` |
-| Sign-in helpers (aws-azure-login, SSO, login hint) | `SignInSetup.cs`, `ProfileSetup.cs`, `Tools.cs`, `Assets\login-hint-shim.js` |
+| Microsoft sign-in (WebView2 sign-in window, SAML, STS) | `EntraSignIn.cs` |
+| Profiles: add, edit, remove (Microsoft and SSO forms) | `ProfileSetup.cs`, `ProfileForms.cs` |
+| Bundled tools | `Tools.cs` |
 | Settings, theme, splash | `SettingsForm.cs`, `Theme.cs`, `SplashForm.cs` |
 | Credential Manager | `CredentialStore.cs` |
 
@@ -319,10 +324,9 @@ that break existing setups. The version is set in `SwitchboardRM.csproj`, and ev
 | Component | Licence | Use |
 |---|---|---|
 | [AWS SDK for .NET](https://github.com/aws/aws-sdk-net) | Apache 2.0 | AWS calls (NuGet) |
-| [Microsoft.Web.WebView2](https://www.nuget.org/packages/Microsoft.Web.WebView2) | see package | SSH terminal host (NuGet) |
+| [Microsoft.Web.WebView2](https://www.nuget.org/packages/Microsoft.Web.WebView2) | see package | Microsoft sign-in window and terminals (NuGet) |
 | [xterm.js](https://github.com/xtermjs/xterm.js) 5.5.0 + fit add-on 0.10.0 | MIT | SSH terminal (in `Assets\terminal\`) |
-| [aws-azure-login](https://github.com/aws-azure-login/aws-azure-login) | MIT | Entra sign-in (bundled by `collect-tools.ps1`) |
-| [Node.js](https://nodejs.org) | MIT | runs aws-azure-login (bundled) |
+| [Microsoft ConPTY](https://github.com/microsoft/terminal) | MIT | terminals, so Windows sign-in windows (WAM) appear (bundled) |
 | [Session Manager plugin](https://github.com/aws/session-manager-plugin) | Apache 2.0 | tunnels (bundled) |
 | [AWS CLI v2](https://github.com/aws/aws-cli) | Apache 2.0 | SSO sign-in (bundled) |
 

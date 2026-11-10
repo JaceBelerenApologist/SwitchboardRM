@@ -4,7 +4,7 @@ using System.Text;
 namespace SwitchboardRM;
 
 /// <summary>
-/// Runs the sign-in helpers (aws-azure-login, or "aws sso login" for SSO profiles) without a console window.
+/// Runs command-line helpers (such as "aws sso login" for SSO profiles) without a console window.
 /// Everything else talks to AWS through the SDK (see AwsServices.cs).
 /// </summary>
 internal static class Cli
@@ -34,7 +34,7 @@ internal static class Cli
         catch (OperationCanceledException)
         {
             // Only reached when a sign-in is cancelled. The tree kill is needed here because
-            // cmd.exe starts aws-azure-login (Node.js), which starts a browser helper.
+            // a helper can start programs of its own (the AWS CLI opens a browser).
             try { p.Kill(true); } catch { }
             return (-2, "", "Cancelled");
         }

@@ -35,7 +35,7 @@ internal sealed class SettingsForm : Form
     private readonly List<Control> _pages = new();
 
     // profile page
-    private readonly ComboBox _cboProfile = new() { Width = 280, DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly ComboBox _cboProfile = new() { Width = ContentWidth, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly Label _lblProfileStatus = Muted("");
     private readonly FlowLayoutPanel _regionPanel = new()
     {
@@ -257,22 +257,29 @@ internal sealed class SettingsForm : Form
     /// The profile list with its buttons beside it. The buttons are made exactly as tall as the list box (whose
     /// height comes from its font and the display scaling) and share its top edge, so the row lines up.
     /// </summary>
+    /// <summary>The profile list on its own line (the page's full width), with its buttons in a row underneath.</summary>
     private static FlowLayoutPanel ProfileRow(ComboBox combo, params Button[] buttons)
     {
+        var block = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Margin = new Padding(0, 4, 0, 0),
+        };
+        combo.Margin = new Padding(0);
         var row = new FlowLayoutPanel
         {
-            FlowDirection = FlowDirection.LeftToRight, AutoSize = true, WrapContents = false, Margin = new Padding(0, 4, 0, 0),
+            FlowDirection = FlowDirection.LeftToRight, AutoSize = true, WrapContents = true,
+            MaximumSize = new Size(ContentWidth, 0), Margin = new Padding(0, 8, 0, 0),
         };
-        combo.Margin = new Padding(0, 0, 8, 0);
         foreach (var b in buttons)
         {
             b.AutoSize = false;
             b.Padding = new Padding(8, 0, 8, 0);
             b.Margin = new Padding(0, 0, 6, 0);
         }
-        row.Controls.Add(combo);
         row.Controls.AddRange(buttons);
-        return row;
+        block.Controls.Add(combo);
+        block.Controls.Add(row);
+        return block;
     }
 
     /// <summary>Size the profile buttons to the list box's real height (known once the form's font is applied).</summary>
@@ -318,8 +325,12 @@ internal sealed class SettingsForm : Form
         var signIn = Btn("Sign in now", primary: true);
         signIn.Click += (_, _) => { SignInRequested = true; Close(); };
 
-        var setup = Btn("Set up Microsoft sign-in...");
-        setup.Click += (_, _) => SignInSetup.Run(SelectedProfile, this);
+        var editProfile = Btn("Edit profile ...");
+        editProfile.Click += async (_, _) =>
+        {
+            if (SelectedProfile.Length == 0) return;
+            if (ProfileSetup.Edit(this, SelectedProfile)) await CheckProfileAsync();
+        };
 
         _cboProfile.SelectedIndexChanged += async (_, _) => await CheckProfileAsync();
         var addProfile = Btn("Add profile ...");
@@ -348,17 +359,19 @@ internal sealed class SettingsForm : Form
             _cboProfile.SelectedIndex = _cboProfile.Items.Count > 0 ? 0 : -1;
             await CheckProfileAsync();
         };
-        _profileButtons = new[] { addProfile, removeProfile };
+        _profileButtons = new[] { editProfile, addProfile, removeProfile };
 
         page.Controls.AddRange(new Control[]
         {
             Title("AWS profile"),
             Muted("Switchboard uses an AWS profile saved on this computer (the same ones the AWS command line uses) " +
                   "to find your servers and open connections. The profile picked here is also the one shown in the main toolbar. " +
-                  "Add profile sets up a new one without changing the others."),
+                  "Edit profile changes its sign-in details (for Microsoft sign-in: tenant, AWS app, account, region, " +
+                  "session length and default role; for SSO: start URL, account and role); Add profile sets up a new " +
+                  "one without changing the others. Both are saved in ~/.aws/config, where other AWS tools see them too."),
 
             Heading("Profile"),
-            ProfileRow(_cboProfile, addProfile, removeProfile),
+            ProfileRow(_cboProfile, editProfile, addProfile, removeProfile),
             _lblProfileStatus,
 
             Heading("Sign in"),
@@ -375,14 +388,6 @@ internal sealed class SettingsForm : Form
                   "profiles run \"aws sso logout\"), after ending your open sessions. Other tools using the same " +
                   "profile, such as the AWS CLI, are signed out too. AWS > Sign out does it at any time."),
             Muted("The refresh icon on the toolbar (or F5) only reloads the server list. It doesn't sign in again."),
-
-            Heading("First-time setup"),
-            Muted("Sets up the Microsoft sign-in helper (aws-azure-login) with your organisation's sign-in details. " +
-                  (Tools.HasBundledAzureLogin
-                      ? "The helper comes with Switchboard, so nothing needs installing. "
-                      : "The helper isn't bundled with this copy of Switchboard, so this installs it (needs Node.js). ") +
-                  "You only need this once per computer, or when adding a new profile."),
-            ButtonRow(setup),
 
             Heading("Regions"),
             Muted("Tick the AWS regions to look for servers in. Each extra region adds a little to how long the list " +
@@ -998,7 +1003,6 @@ internal sealed class SettingsForm : Form
             }),
             Link("AWS Session Manager documentation",
                 () => OpenPath("https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html")),
-            Link("aws-azure-login on GitHub", () => OpenPath("https://github.com/aws-azure-login/aws-azure-login")),
 
             Heading("Bundled tools"),
             tools,
