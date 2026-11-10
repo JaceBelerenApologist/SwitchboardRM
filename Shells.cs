@@ -13,8 +13,9 @@ internal sealed record ShellInfo(string Id, string Name, string CommandLine);
 internal static class Shells
 {
     private static List<ShellInfo> _wsl = new();
+    private static Task<bool> _wslLookup;
+    private static DateTime _wslListedAt = DateTime.MinValue;
     private static readonly object _gate = new();
-    private static Task _wslLookup;
 
     public static List<ShellInfo> Available()
     {
@@ -67,36 +68,59 @@ internal static class Shells
     }
 
     /// <summary>List WSL distributions once, in the background ("wsl --list --quiet" prints UTF-16).</summary>
-    public static void StartWslLookup()
-    {
-        if (_wslLookup != null) return;
-        string wsl = Path.Combine(Environment.SystemDirectory, "wsl.exe");
-        if (!File.Exists(wsl)) { _wslLookup = Task.CompletedTask; return; }
+    /// <summary>Start listing WSL distributions in the background (see RefreshWslAsync).</summary>
+    public static void StartWslLookup() => _ = RefreshWslAsync();
 
-        _wslLookup = Task.Run(async () =>
+    /// <summary>
+    /// List the WSL distributions again ("wsl --list --quiet", which doesn't start WSL), so ones installed or removed
+    /// while Switchboard runs show up. Runs at most every few seconds, and only one at a time. True if the list changed.
+    /// </summary>
+    public static Task<bool> RefreshWslAsync()
+    {
+        lock (_gate)
         {
-            try
+            if (_wslLookup != null && !_wslLookup.IsCompleted) return _wslLookup;
+            if ((DateTime.UtcNow - _wslListedAt).TotalSeconds < 3) return Task.FromResult(false);
+            _wslListedAt = DateTime.UtcNow;
+            return _wslLookup = Task.Run(ListWslAsync);
+        }
+    }
+
+    private static async Task<bool> ListWslAsync()
+    {
+        string wsl = Path.Combine(Environment.SystemDirectory, "wsl.exe");
+        if (!File.Exists(wsl)) return false;
+        try
+        {
+            var psi = new ProcessStartInfo(wsl, "--list --quiet")
             {
-                var psi = new ProcessStartInfo(wsl, "--list --quiet")
-                {
-                    UseShellExecute = false, CreateNoWindow = true,
-                    RedirectStandardOutput = true, RedirectStandardError = true,
-                    StandardOutputEncoding = Encoding.Unicode,
-                };
-                using var p = Process.Start(psi);
-                var read = p.StandardOutput.ReadToEndAsync();
-                if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } return; }
-                if (p.ExitCode != 0) return; // WSL not set up
-                var distros = (await read).Split('\n')
-                    .Select(l => l.Replace("\0", "").Trim())
-                    .Where(l => l.Length > 0 && !l.StartsWith("docker-desktop", StringComparison.OrdinalIgnoreCase))
-                    .Distinct()
-                    .Select(d => new ShellInfo("wsl:" + d, "WSL: " + d, Quote(wsl) + " -d " + Quote(d) + " --cd ~"))
-                    .ToList();
-                lock (_gate) _wsl = distros;
+                UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardOutput = true, RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.Unicode,
+            };
+            using var p = Process.Start(psi);
+            var read = p.StandardOutput.ReadToEndAsync();
+            if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } return false; }
+            // a failed listing (WSL not set up, or none installed) means no distributions
+            var distros = p.ExitCode != 0 ? new List<ShellInfo>() : (await read).Split('\n')
+                .Select(l => l.Replace("\0", "").Trim())
+                .Where(l => l.Length > 0 && !l.StartsWith("docker-desktop", StringComparison.OrdinalIgnoreCase))
+                .Distinct()
+                .Select(d => new ShellInfo("wsl:" + d, "WSL: " + d, Quote(wsl) + " -d " + Quote(d) + " --cd ~"))
+                .ToList();
+            lock (_gate)
+            {
+                bool changed = !_wsl.Select(x => x.Id).SequenceEqual(distros.Select(x => x.Id));
+                _wsl = distros;
+                if (changed) Log.Write("WSL distributions: " + (distros.Count == 0 ? "none" : string.Join(", ", distros.Select(x => x.Name[5..]))));
+                return changed;
             }
-            catch (Exception ex) { Log.Write("WSL lookup failed: " + ex.Message); }
-        });
+        }
+        catch (Exception ex)
+        {
+            Log.Write("WSL lookup failed: " + ex.Message);
+            return false;
+        }
     }
 
     private static string Quote(string s) => s.Contains(' ') ? "\"" + s + "\"" : s;

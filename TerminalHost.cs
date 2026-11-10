@@ -17,6 +17,8 @@ internal sealed class TerminalHost : UserControl
     public event Action<int> SessionEnded;
     /// <summary>The user pressed Enter after the session ended. Raised on the UI thread.</summary>
     public event Action ReconnectRequested;
+    /// <summary>The user pressed Esc after the session ended: close the tab. Raised on the UI thread.</summary>
+    public event Action CloseRequested;
     /// <summary>One of Switchboard's tab keys inside the terminal: "next", "prev", "close" or "newshell". UI thread.</summary>
     public event Action<string> AppShortcut;
 
@@ -95,7 +97,7 @@ internal sealed class TerminalHost : UserControl
     public void Fail(string text)
     {
         _ended = true;
-        Post($"\x1b[31m{text}\x1b[0m\r\n\x1b[90m[Press Enter to try again, or close the tab.]\x1b[0m\r\n");
+        Post($"\x1b[31m{text}\x1b[0m\r\n\x1b[90m[Press Enter to try again, or Esc to close the tab.]\x1b[0m\r\n");
     }
 
     public void ApplyTheme()
@@ -155,7 +157,9 @@ internal sealed class TerminalHost : UserControl
                     string d = m.GetProperty("d").GetString();
                     if (_ended)
                     {
-                        if (d.Contains('\r')) ReconnectRequested?.Invoke();
+                        // Esc on its own (arrow and function keys send longer sequences that also start with Esc)
+                        if (d == "\x1b") CloseRequested?.Invoke();
+                        else if (d.Contains('\r')) ReconnectRequested?.Invoke();
                         return;
                     }
                     _pty?.Write(d);
@@ -190,7 +194,7 @@ internal sealed class TerminalHost : UserControl
                     if (!ReferenceEquals(_pty, pty)) return; // an earlier session ending after a reconnect
                     _ended = true;
                     Post($"\r\n\x1b[90m[Session ended{(code != 0 ? $" (exit code {code})" : "")}. " +
-                         $"Press Enter to {EndedAction}, or close the tab.]\x1b[0m\r\n");
+                         $"Press Enter to {EndedAction}, or Esc to close the tab.]\x1b[0m\r\n");
                     SessionEnded?.Invoke(code);
                 }),
                 workingDirectory: _workingDirectory,

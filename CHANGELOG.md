@@ -3,6 +3,13 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.0.2 (2026-11-14)
+
+- WSL distributions installed or removed while Switchboard is running now show up in the shell menus (the terminal
+  button's arrow, the + menus, File > Open shell): the list is checked again each time a menu opens, and an open menu
+  updates itself if it changed.
+- When a shell or SSH session has ended, Esc closes its tab, as Enter starts it again (the message says so).
+
 ## 3.0.1 (2026-11-14)
 
 - Fixed: "Keep me signed in" on the toolbar could still be cut short ("Keep me s..."), especially with a wider app

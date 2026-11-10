@@ -638,11 +638,7 @@ internal sealed class MainForm : Form
         _tabs.NewTabRequested += screen =>
         {
             // the main tabs' +: a one-off connection, then the shells (the docked panel's + is shells only)
-            FillShellMenu(_shellMenu.Items, _shellMenu);
-            _shellMenu.Items.Insert(0, new ToolStripMenuItem("Remote Desktop to a computer ...", null,
-                async (_, _) => await ConnectAdHocAsync()));
-            _shellMenu.Items.Insert(1, new ToolStripSeparator());
-            Theme.ApplyMenu(_shellMenu);
+            FillShellMenu(_shellMenu.Items, _shellMenu, withConnect: true);
             _shellMenu.Show(screen);
         };
         _smAdHoc.Click += async (_, _) => await ConnectAdHocAsync();
@@ -1356,9 +1352,17 @@ internal sealed class MainForm : Form
     // ---------------------------------------------------------------- local shells
 
     /// <summary>One menu entry per shell on this PC (the default marked), in a toolbar, File or + menu.</summary>
-    private void FillShellMenu(ToolStripItemCollection items, ToolStrip owner, bool docked = false)
+    /// <param name="withConnect">The main tabs' +: "Remote Desktop to a computer ..." above the shells.</param>
+    /// <param name="refresh">Re-check WSL distributions too, and rebuild the menu if they changed while it's open.</param>
+    private void FillShellMenu(ToolStripItemCollection items, ToolStrip owner, bool docked = false, bool withConnect = false,
+        bool refresh = true)
     {
         items.Clear();
+        if (withConnect)
+        {
+            items.Add(new ToolStripMenuItem("Remote Desktop to a computer ...", null, async (_, _) => await ConnectAdHocAsync()));
+            items.Add(new ToolStripSeparator());
+        }
         var def = Shells.Default(_settings.DefaultShell);
         foreach (var shell in Shells.Available())
         {
@@ -1368,6 +1372,18 @@ internal sealed class MainForm : Form
             items.Add(item);
         }
         Theme.ApplyMenu(owner);
+        if (refresh) RefreshShellMenu(items, owner, docked, withConnect);
+    }
+
+    /// <summary>A WSL distribution installed or removed since the last look: rebuild the menu if it's still open.</summary>
+    private async void RefreshShellMenu(ToolStripItemCollection items, ToolStrip owner, bool docked, bool withConnect)
+    {
+        try
+        {
+            if (await Shells.RefreshWslAsync() && owner.Visible)
+                FillShellMenu(items, owner, docked, withConnect, refresh: false);
+        }
+        catch (Exception ex) { Log.Write("Refreshing the shell menu failed: " + ex.Message); }
     }
 
     /// <summary>Environment for a shell: AWS_PROFILE set to the profile in use, and the bundled tools on PATH.</summary>
@@ -1407,6 +1423,12 @@ internal sealed class MainForm : Form
         var page = new TabPage(ThemedTabControl.IconSpace + name) { BackColor = Theme.Current.Back, Tag = ThemedTabControl.ShellTag };
         var term = new TerminalHost { Dock = DockStyle.Fill, EndedAction = "restart" };
         term.AppShortcut += key => OnAppShortcut(key, _sessions.FirstOrDefault(x => x.Term == term));
+        // Esc on an ended terminal closes its tab (after this key event, since closing destroys the terminal)
+        term.CloseRequested += () => BeginInvoke(() =>
+        {
+            var ended = _sessions.FirstOrDefault(x => x.Term == term);
+            if (ended != null) CloseSession(ended);
+        });
         page.Controls.Add(term);
         var session = new Session { Inst = inst, Kind = Protocol.Local, Term = term, Page = page, Docked = docked };
         _sessions.Add(session);
@@ -1473,6 +1495,12 @@ internal sealed class MainForm : Form
         var page = new TabPage(inst.Name + " · SSH") { BackColor = Theme.Current.Back };
         var term = new TerminalHost { Dock = DockStyle.Fill };
         term.AppShortcut += key => OnAppShortcut(key, _sessions.FirstOrDefault(x => x.Term == term));
+        // Esc on an ended terminal closes its tab (after this key event, since closing destroys the terminal)
+        term.CloseRequested += () => BeginInvoke(() =>
+        {
+            var ended = _sessions.FirstOrDefault(x => x.Term == term);
+            if (ended != null) CloseSession(ended);
+        });
         page.Controls.Add(term);
         var session = new Session { Inst = inst, Kind = Protocol.Ssh, Term = term, Page = page, Docked = _settings.DockNewTerminals };
         _sessions.Add(session);
