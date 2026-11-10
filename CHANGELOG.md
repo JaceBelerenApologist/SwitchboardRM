@@ -3,6 +3,15 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.0.1 (2026-11-14)
+
+- Fixed: "Keep me signed in" on the toolbar could still be cut short ("Keep me s..."), especially with a wider app
+  font. The extra room added in 2.18.6 was taken away again when the text was drawn; checkboxes now draw their text in
+  all the room they have, and the toolbar's is sized from its text in the current font whenever that font changes.
+- The AWS CLI's help examples (about 4,000 small files) are left out of the bundle; help pages work without them.
+- The log no longer grows without limit: when app.log passes 10 MB it becomes app.1.log (replacing the previous one)
+  and a new app.log starts, so logs take at most about 20 MB.
+
 ## 3.0.0 (2026-11-13)
 
 - Microsoft sign-in is built in, and is now the only Microsoft sign-in: Switchboard's own sign-in window, on

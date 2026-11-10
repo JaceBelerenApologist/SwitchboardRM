@@ -1139,6 +1139,17 @@ internal sealed class MainForm : Form
 
     private TabHotkeyHook _tabKeys;
 
+    /// <summary>"Keep me signed in" on the toolbar: as wide as its text needs in its current font, plus room to spare.</summary>
+    private void SizeKeepSignedIn()
+    {
+        if (_keepHost == null) return;
+        var needed = _chkKeep.GetPreferredSize(Size.Empty);
+        var size = new Size(needed.Width + LogicalToDeviceUnits(24), needed.Height);
+        _chkKeep.AutoSize = false;
+        _chkKeep.Size = size;
+        _keepHost.Size = size;
+    }
+
     /// <summary>
     /// Whether the tab-key hook should take Ctrl+Alt+arrow now: Switchboard's main window is the active window, there
     /// are tabs, and the keyboard isn't in a terminal (terminals handle these keys themselves, and a docked one moves
@@ -2373,8 +2384,12 @@ internal sealed class MainForm : Form
     {
         if (_keepHost == null)
         {
-            _chkKeep.Padding = new Padding(0, 0, LogicalToDeviceUnits(100), 0);   // 100 px wider than its text needs
-            _keepHost = new ToolStripControlHost(_chkKeep) { Margin = new Padding(8, 3, 4, 2), AutoSize = true };
+            _keepHost = new ToolStripControlHost(_chkKeep) { Margin = new Padding(8, 3, 4, 2), AutoSize = false };
+            // sized from its text in its current font, with room to spare, and again whenever the font (Settings >
+            // Appearance) or text changes, so a wider font can't cut it short
+            _chkKeep.FontChanged += (_, _) => SizeKeepSignedIn();
+            _chkKeep.TextChanged += (_, _) => SizeKeepSignedIn();
+            SizeKeepSignedIn();
         }
         _tips.SetToolTip(_chkKeep,
             "On: check the AWS sign-in every few minutes and renew it in the background.\n" +

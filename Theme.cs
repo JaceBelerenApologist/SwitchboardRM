@@ -938,8 +938,8 @@ internal sealed class ThemedCheckBox : CheckBox
         }
         g.SmoothingMode = oldMode;
 
-        var textRect = new Rectangle(box.Right + Gap, 0, Math.Max(0, ClientSize.Width - box.Right - Gap - Padding.Right),
-                                     ClientSize.Height);
+        // all the width right of the box: padding only adds room (taking it away here is what cut text short)
+        var textRect = new Rectangle(box.Right + Gap, 0, Math.Max(0, ClientSize.Width - box.Right - Gap), ClientSize.Height);
         TextRenderer.DrawText(g, Text, Font, textRect, Enabled ? ForeColor : p.Muted,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
             TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);

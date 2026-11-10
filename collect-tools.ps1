@@ -104,6 +104,14 @@ if ($aws) {
     } else {
         $awsDir = Join-Path $root 'aws-cli'
         Copy-Tree $awsHome $awsDir
+        # the example sections of "aws <command> help" (thousands of small files): help pages work without them, and
+        # nothing else reads them, so they're left out to keep installs and unzipping quick
+        $examples = Join-Path $awsDir 'awscli\examples'
+        if (Test-Path $examples) {
+            $count = (Get-ChildItem $examples -Recurse -File).Count
+            Remove-Item $examples -Recurse -Force
+            Write-Host "  (left out the CLI's help examples: $count files)"
+        }
         $awsVersion = ((& $aws --version) -split ' ')[0] -replace '^aws-cli/', ''
         $files = Ensure-Licence $awsDir 'The AWS CLI v2' 'Apache License 2.0 (it also bundles Python and other components under their own licences)' 'https://github.com/aws/aws-cli/blob/v2/LICENSE.txt'
         Add-Summary 'AWS CLI v2' $awsVersion 'Apache-2.0 (+ bundled Python etc.)' 'https://github.com/aws/aws-cli' 'aws-cli\' $files

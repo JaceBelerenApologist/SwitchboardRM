@@ -226,6 +226,11 @@ internal static class Log
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), AppInfo.DataName, "logs");
     private static readonly object Gate = new();
 
+    /// <summary>app.log is rotated past this size: it becomes app.1.log (replacing the previous one) and a new one starts.</summary>
+    private const long MaxBytes = 10L * 1024 * 1024;
+    private const int CheckEvery = 200;   // writes between size checks (the first write always checks)
+    private static int _writesSinceCheck = CheckEvery;
+
     public static void Write(string message)
     {
         try
@@ -233,11 +238,33 @@ internal static class Log
             lock (Gate)
             {
                 Directory.CreateDirectory(Dir);
-                File.AppendAllText(Path.Combine(Dir, "app.log"),
-                    $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {message}{Environment.NewLine}");
+                string path = Path.Combine(Dir, "app.log");
+                if (++_writesSinceCheck >= CheckEvery)
+                {
+                    _writesSinceCheck = 0;
+                    Rotate(path);
+                }
+                File.AppendAllText(path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {message}{Environment.NewLine}");
             }
         }
         catch { /* logging must never crash the app */ }
+    }
+
+    /// <summary>
+    /// Keep the log from growing without limit: past MaxBytes, app.log becomes app.1.log (the one before it is
+    /// deleted) and the next line starts a fresh app.log. So at most about 2 x MaxBytes is kept.
+    /// </summary>
+    private static void Rotate(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists || info.Length < MaxBytes) return;
+            string previous = Path.Combine(Dir, "app.1.log");
+            File.Move(path, previous, overwrite: true);
+            File.AppendAllText(path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} Log rotated: the earlier log is app.1.log{Environment.NewLine}");
+        }
+        catch { /* e.g. the file is open elsewhere: try again at the next check */ }
     }
 
     public static void Cleanup()
