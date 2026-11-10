@@ -6,6 +6,7 @@
 ;   Install for all users asks for admin (UAC)    ->  C:\Program Files\Switchboard Remote Manager
 ;
 ; Silent:     SwitchboardRM-Setup-x.y.z.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /ALLUSERS   (or /CURRENTUSER)
+;             Switchboard's own updater adds /SBUPDATE=1, which starts Switchboard again afterwards.
 ; Uninstall:  "<install folder>\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ; Settings in %APPDATA%\SwitchboardRM are kept on uninstall, so reinstalling picks up where it left off.
 ;
@@ -87,3 +88,11 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+; after an update started from inside Switchboard (silent, /SBUPDATE=1): start it again, as the signed-in user
+Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: IsAppUpdate
+
+[Code]
+function IsAppUpdate: Boolean;
+begin
+  Result := ExpandConstant('{param:SBUPDATE|0}') = '1';
+end;

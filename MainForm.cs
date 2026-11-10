@@ -162,6 +162,18 @@ internal sealed class MainForm : Form
 
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 2000 };
 
+    // updates: a notice under the toolbar when GitHub has a newer release
+    private readonly System.Windows.Forms.Timer _updateTimer = new() { Interval = 60_000 };   // first check a minute after start
+    private readonly Panel _updateBanner = new() { Dock = DockStyle.Top, Height = 34, Visible = false };
+    private readonly Label _updateText = new() { AutoSize = true, Margin = new Padding(12, 9, 14, 0) };
+    private readonly LinkLabel _updateNotes = new() { Text = "What's new", AutoSize = true, Margin = new Padding(0, 9, 14, 0) };
+    private readonly LinkLabel _updateNow = new() { Text = "Update now", AutoSize = true, Margin = new Padding(0, 9, 14, 0) };
+    private readonly LinkLabel _updateLater = new() { Text = "Later", AutoSize = true, Margin = new Padding(0, 9, 14, 0) };
+    private readonly LinkLabel _updateSkip = new() { Text = "Skip this version", AutoSize = true, Margin = new Padding(0, 9, 14, 0) };
+    private UpdateInfo _update;
+    private bool _updating;   // closing to install an update: no questions, and stay signed in for the restart
+    private readonly ToolStripMenuItem _miClone = new("New server &like this one ...");
+
     // "it's working" indicators
     private readonly ToolStripProgressBar _progress = new()
     { Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 30, Width = 130, Visible = false };
@@ -339,6 +351,8 @@ internal sealed class MainForm : Form
         { ShortcutKeys = Keys.F5 });
 
         var aws = new ToolStripMenuItem("&AWS");
+        aws.DropDownItems.Add(new ToolStripMenuItem("&New server ...", null, async (_, _) => await OpenNewServerAsync(null)));
+        aws.DropDownItems.Add(new ToolStripSeparator());
         aws.DropDownItems.Add(new ToolStripMenuItem("&Sign in...", null, async (_, _) => await SignInAsync()));
         aws.DropDownItems.Add(new ToolStripMenuItem("Sign &out", null, async (_, _) => await SignOutNowAsync()));
         aws.DropDownItems.Add(new ToolStripMenuItem("&Edit profile ...", null, (_, _) => ProfileSetup.Edit(this, Profile)));
@@ -365,6 +379,7 @@ internal sealed class MainForm : Form
         server.DropDownOpening += (_, _) => UpdateActionStates();
 
         var help = new ToolStripMenuItem("&Help");
+        help.DropDownItems.Add(new ToolStripMenuItem("Check for &updates ...", null, async (_, _) => await CheckForUpdatesAsync(manual: true)));
         help.DropDownItems.Add(new ToolStripMenuItem("&About " + AppInfo.ShortName, null,
             async (_, _) => await OpenSettingsAsync(SettingsForm.Page.About)));
 
@@ -456,8 +471,11 @@ internal sealed class MainForm : Form
             new ToolStripMenuItem("Copy instance ID", null, (_, _) => CopyToClipboard(Selected()?.Id)),
             new ToolStripMenuItem("Copy IP address", null, (_, _) => CopyToClipboard(Selected()?.Ip)),
             new ToolStripSeparator(),
+            _miClone,
+            new ToolStripSeparator(),
             _miAdd, _miEdit, _miRemove,
         });
+        _miClone.Click += async (_, _) => { if (Selected() is { IsEc2: true, IsSaved: false } src) await OpenNewServerAsync(src); };
         _listMenu.Opening += (_, e) =>
         {
             if (_list.PointToClient(Cursor.Position).Y < HeaderHeight())
@@ -474,6 +492,7 @@ internal sealed class MainForm : Form
                 return;
             }
             foreach (ToolStripItem item in _listMenu.Items) item.Visible = true;
+            _miClone.Visible = Selected() is { IsEc2: true, IsSaved: false };   // only an EC2 server can be copied
         };
         _list.ContextMenuStrip = _listMenu;
         _list.CellColor = (item, column) =>
@@ -523,6 +542,8 @@ internal sealed class MainForm : Form
         };
 
         _split.Dock = DockStyle.Fill;
+        BuildUpdateBanner();
+        Controls.Add(_updateBanner); // added before the toolbar, so it docks below it
         Controls.Add(_tool);
         Controls.Add(_menu);        // added after the toolbar so it docks above it
         Controls.Add(_statusStrip);
@@ -659,6 +680,12 @@ internal sealed class MainForm : Form
         };
         _timer.Tick += (_, _) => PollSessions();
         _timer.Start();
+        _updateTimer.Tick += async (_, _) =>
+        {
+            _updateTimer.Interval = 6 * 60 * 60 * 1000;   // after the first, look every few hours whether a day has passed
+            await CheckForUpdatesAsync(manual: false);
+        };
+        _updateTimer.Start();
         _authTimer.Tick += async (_, _) => await AuthHeartbeatAsync();
         _authTimer.Start();
         WatchSessionState();
@@ -717,7 +744,7 @@ internal sealed class MainForm : Form
         string open = remote > 0 && shells > 0 ? $"{remote} remote session(s) and {shells} shell(s) are open"
                     : remote > 0 ? $"{remote} remote session(s) are open"
                     : $"{shells} shell(s) are open";
-        if (remote + shells > 0 && !Ask($"{open}. Close them and exit?"))
+        if (remote + shells > 0 && !_updating && !Ask($"{open}. Close them and exit?"))
         {
             e.Cancel = true;
             return;
@@ -732,7 +759,7 @@ internal sealed class MainForm : Form
         _timer.Stop();
         _authTimer.Stop();
         int awsSessions = _sessions.Count(x => x.Tunnel != null);
-        bool signOut = _settings.SignOutOnClose;
+        bool signOut = _settings.SignOutOnClose && !_updating;   // an update restarts Switchboard: stay signed in
         Hide();
         foreach (var s in _sessions.ToList()) CloseSession(s); // also asks AWS to end each tunnelled session
 
@@ -1472,6 +1499,200 @@ internal sealed class MainForm : Form
         }
     }
 
+    // ---------------------------------------------------------------- new server
+
+    /// <summary>AWS > New server (from == null), or "New server like this one" from an EC2 server.</summary>
+    private async Task OpenNewServerAsync(Instance from)
+    {
+        if (string.IsNullOrEmpty(Profile)) { SetStatus("Choose an AWS profile and sign in first."); return; }
+        CloneSource clone = null;
+        if (from != null)
+        {
+            SetStatus($"Reading {from.Name}'s settings ...");
+            try { clone = await ServerLaunch.ReadForCloneAsync(Profile, from.Region, from.Id, CancellationToken.None); }
+            catch (Exception ex)
+            {
+                SetStatus("");
+                MessageBox.Show(this, $"Couldn't read {from.Name}'s settings: {Aws.Describe(ex)}", "New server",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            SetStatus("");
+        }
+
+        var regions = _settings.ScanRegions.Count > 0 ? _settings.ScanRegions : new List<string> { "us-east-1" };
+        using var f = new NewServerForm(Profile, _settings, regions,
+            (region, name) => _aws.Any(i => i.Region == region && i.Name.Equals(name, StringComparison.OrdinalIgnoreCase)),
+            clone, from?.Name);
+        if (f.ShowDialog(this) != DialogResult.OK || f.LaunchedId.Length == 0) return;
+
+        SetStatus($"Launched {f.LaunchedName} ({f.LaunchedId}) in {f.LaunchedRegion}. It's in the list now; Connect works once " +
+                  "Session Manager reports it online, usually within a few minutes.");
+        await RefreshAsync();
+    }
+
+    // ---------------------------------------------------------------- updates
+
+    private void BuildUpdateBanner()
+    {
+        var row = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false };
+        row.Controls.AddRange(new Control[] { _updateText, _updateNotes, _updateNow, _updateLater, _updateSkip });
+        _updateBanner.Controls.Add(row);
+        _updateNotes.LinkClicked += (_, _) => ShowReleaseNotes();
+        _updateNow.LinkClicked += async (_, _) => await UpdateNowAsync();
+        _updateLater.LinkClicked += (_, _) => _updateBanner.Visible = false;   // until next start (or the next check)
+        _updateSkip.LinkClicked += (_, _) =>
+        {
+            if (_update != null) { _settings.SkippedVersion = _update.Version.ToString(); _settings.Save(); }
+            _updateBanner.Visible = false;
+        };
+    }
+
+    private void StyleUpdateBanner()
+    {
+        var p = Theme.Current;
+        _updateBanner.BackColor = p.Hover;
+        _updateText.ForeColor = p.Text;
+        foreach (var link in new[] { _updateNotes, _updateNow, _updateLater, _updateSkip })
+        {
+            link.LinkColor = link.ActiveLinkColor = link.VisitedLinkColor = p.AccentFore;
+            link.LinkBehavior = LinkBehavior.HoverUnderline;
+            link.Font = _menu.Font;
+        }
+        _updateText.Font = _menu.Font;
+    }
+
+    /// <summary>
+    /// Look for a newer release on GitHub. Automatic checks: at most once a day, if enabled and not turned off by
+    /// policy, and quiet about failures and skipped versions. Manual ones (Help, Settings) always say what they found.
+    /// </summary>
+    private async Task CheckForUpdatesAsync(bool manual)
+    {
+        if (Updater.DisabledByPolicy)
+        {
+            if (manual) MessageBox.Show(this, "Update checks are turned off by your administrator.", "Check for updates",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (!manual && (!_settings.CheckForUpdates || DateTime.UtcNow - _settings.LastUpdateCheck < TimeSpan.FromHours(20))) return;
+
+        try
+        {
+            if (manual) SetStatus("Checking for updates ...");
+            var update = await Updater.CheckAsync(CancellationToken.None);
+            _settings.LastUpdateCheck = DateTime.UtcNow;
+            _settings.Save();
+            if (update == null)
+            {
+                Log.Write($"Update check: {AppInfo.Version} is the latest");
+                if (manual)
+                {
+                    SetStatus("");
+                    MessageBox.Show(this, $"You have the latest version ({AppInfo.Version}).", "Check for updates",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                return;
+            }
+            Log.Write($"Update check: {update.Tag} is available");
+            if (!manual && update.Version.ToString() == _settings.SkippedVersion) return;
+            _update = update;
+            _updateText.Text = $"Switchboard {update.Version} is available (you have {AppInfo.Version}).";
+            StyleUpdateBanner();
+            _updateBanner.Visible = true;
+            if (manual) SetStatus($"Switchboard {update.Version} is available.");
+        }
+        catch (Exception ex)
+        {
+            Log.Write("Update check failed: " + ex.Message);
+            if (manual)
+            {
+                SetStatus("");
+                MessageBox.Show(this, "Couldn't check for updates: " + ex.Message, "Check for updates",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+    }
+
+    private void ShowReleaseNotes()
+    {
+        if (_update == null) return;
+        using var f = new Form
+        {
+            Text = $"What's new in Switchboard {_update.Version}", Icon = AppIcon.Icon, StartPosition = FormStartPosition.CenterParent,
+            ClientSize = new Size(LogicalToDeviceUnits(640), LogicalToDeviceUnits(440)), MinimizeBox = false, ShowInTaskbar = false,
+        };
+        string notes = _update.Notes.Length > 0 ? _update.Notes : "No notes were published with this release.";
+        var text = new TextBox
+        {
+            Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BorderStyle = BorderStyle.None,
+            Text = notes.Replace("\r\n", "\n").Replace("\n", "\r\n"), Font = _menu.Font,
+        };
+        var page = new LinkLabel { Text = "Open the release page", Dock = DockStyle.Bottom, Height = LogicalToDeviceUnits(30), Padding = new Padding(8, 6, 0, 0) };
+        page.LinkClicked += (_, _) => OpenInBrowser(_update.PageUrl);
+        f.Controls.Add(text);
+        f.Controls.Add(page);
+        Theme.Apply(f, Theme.Current.IsDark);
+        f.ShowDialog(this);
+    }
+
+    /// <summary>
+    /// Update now: an installed copy downloads the setup, checks it, and runs it silently in the same scope (it closes
+    /// Switchboard, updates it and starts it again). A copy not installed with the setup opens the release page.
+    /// </summary>
+    private async Task UpdateNowAsync()
+    {
+        var update = _update;
+        if (update == null) return;
+        var (installed, allUsers) = Updater.InstallState();
+        if (!installed || update.SetupUrl.Length == 0)
+        {
+            OpenInBrowser(update.PageUrl);
+            SetStatus("This copy wasn't installed with the setup, so it can't update itself: download the new version from the release page.");
+            return;
+        }
+
+        int open = _sessions.Count(x => x.Web == null);
+        if (!Ask(open > 0
+                ? $"Updating to {update.Version} closes Switchboard and its {open} open tab(s), then starts it again. Update now?"
+                : $"Update to {update.Version} now? Switchboard closes, updates and starts again.")) return;
+
+        _updateNow.Enabled = false;
+        string setup;
+        try
+        {
+            setup = await Updater.DownloadAsync(update, new Progress<int>(p => SetStatus($"Downloading the update: {p}%")), CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Log.Write("Update download/check failed: " + ex.Message);
+            SetStatus("");
+            _updateNow.Enabled = true;
+            if (MessageBox.Show(this, $"The update wasn't installed: {ex.Message}.\n\nOpen the release page to download it yourself?",
+                    "Update", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+                OpenInBrowser(update.PageUrl);
+            return;
+        }
+
+        if (allUsers) SetStatus("Installing the update: Windows asks for permission, since Switchboard is installed for all users.");
+        try { Updater.RunSetup(setup, allUsers); }
+        catch (Exception ex)
+        {
+            // e.g. the permission prompt was declined
+            Log.Write("Update setup didn't start: " + ex.Message);
+            SetStatus("The update didn't start: " + ex.Message);
+            _updateNow.Enabled = true;
+            return;
+        }
+        _updating = true;
+        Close();
+    }
+
+    private static void OpenInBrowser(string url)
+    {
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch (Exception ex) { Log.Write("Couldn't open " + url + ": " + ex.Message); }
+    }
+
     /// <summary>Open a local shell in a new tab, starting in the user folder.</summary>
     private async Task OpenShellAsync(ShellInfo shell, bool docked = false)
     {
@@ -1849,6 +2070,7 @@ internal sealed class MainForm : Form
         _settings.Profile = Profile;
         _settings.Save();
 
+        if (f.UpdateCheckRequested) { await CheckForUpdatesAsync(manual: true); return; }
         if (f.SignInRequested) await SignInAsync();
         else if (profileChanged || f.RegionsChanged)
         {

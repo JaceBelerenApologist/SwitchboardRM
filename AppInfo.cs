@@ -9,6 +9,8 @@ internal static class AppInfo
     public const string ShortName = "Switchboard RM";
     /// <summary>Folder and key name for the app's data (settings, logs, saved passwords). Don't change lightly.</summary>
     public const string DataName = "SwitchboardRM";
+    /// <summary>The GitHub repository releases come from (owner/name), for update checks.</summary>
+    public const string Repo = "JaceBelerenApologist/SwitchboardRM";
     /// <summary>What versions before 2.0 (AWS RDP Launcher) used. Only read, to move data across.</summary>
     public const string OldDataName = "AwsRdpLauncher";
 

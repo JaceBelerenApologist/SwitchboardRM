@@ -34,6 +34,12 @@ ordinary RDP and SSH connections (or imports them from RDCMan, mRemoteNG, `.rdp`
 - Terminals can be docked in a resizable panel under the tabs, next to a remote desktop.
 - Windows sign-in windows (WAM) appear for commands like `Connect-MgGraph` in the terminals, using Microsoft's ConPTY
   bundled in `tools\conpty`.
+- New EC2 servers from the app (AWS > New server, or "New server like this one" from an existing server): current
+  AWS Windows/Linux images or your own, instance type, network, security groups, instance profile (Session Manager
+  checked), disk, name and tags, with a review before launching.
+- Updates itself: a daily check of GitHub releases, and a verified, silent update for installed copies. Turn it off
+  in Settings > About, or for everyone with `DisableUpdateCheck = 1` (DWORD) under
+  `HKLM\SOFTWARE\Policies\SwitchboardRM`.
 - Claude in the shell menus: Claude Code (Anthropic's command-line agent) in a terminal tab, with an installer if
   it's missing, and claude.ai in a tab, signed in with your own account.
 - Local shells in tabs too: Command Prompt, Windows PowerShell, PowerShell 7, Git Bash and WSL (when installed),

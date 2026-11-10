@@ -3,6 +3,24 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.2.0 (2026-11-16)
+
+- New server (AWS > New server): create an EC2 server from one screen. Image: AWS's current Windows Server, Amazon
+  Linux and Ubuntu builds, or your own images (newest first). Instance type: every type that can run the image, with
+  vCPUs and memory (type to search). Disk size and type, name (with a warning if the name is already used in the
+  region) and optional tags. Network: subnet (the VPC is only asked when there's more than one), security groups, and
+  a public IP only if wanted. Instance profile: listed with a mark when it has Session Manager permissions, and a
+  warning when it doesn't (Switchboard can't connect without them). Optional key pair. A review lists everything
+  before anything is created; instance metadata is set to tokens only (IMDSv2). Choices are remembered per region.
+- New server like this one (right-click an EC2 server): the same screen, filled in from that server's image, type,
+  disk, subnet, security groups, instance profile, key pair and tags.
+- Updates: Switchboard checks GitHub for a newer release once a day (and on Help > Check for updates) and shows a
+  notice under the toolbar: What's new, Update now, Later, Skip this version. Update now downloads the setup, checks
+  it (size, checksum, an intact signature from the same publisher as the running copy) and installs it silently for
+  the same scope, then Switchboard starts again, still signed in. Copies that weren't installed with the setup open
+  the release page instead. Settings > About turns the daily check off; administrators can turn it off with
+  DisableUpdateCheck = 1 under HKLM or HKCU\SOFTWARE\Policies\SwitchboardRM.
+
 ## 3.1.1 (2026-11-15)
 
 - Fixed: the toolbar terminal button's dropdown didn't use the app font (Settings > Appearance) like the other menus.

@@ -14,6 +14,8 @@ internal sealed class SettingsForm : Form
     public string SelectedProfile => (_cboProfile.SelectedItem as string ?? "").Trim();
     /// <summary>"Sign in now" was clicked: the main window signs in once this closes.</summary>
     public bool SignInRequested { get; private set; }
+    /// <summary>About > Check for updates now: done by the main window once Settings closes.</summary>
+    public bool UpdateCheckRequested { get; private set; }
     /// <summary>Profiles removed while Settings was open (the toolbar mustn't keep showing them).</summary>
     public List<string> RemovedProfiles { get; } = new();
     /// <summary>The regions to scan were changed.</summary>
@@ -304,6 +306,22 @@ internal sealed class SettingsForm : Form
     {
         base.OnDpiChanged(e);
         SyncProfileButtons();
+    }
+
+    /// <summary>About: daily update checks on or off (shown greyed out when an administrator turned them off).</summary>
+    private Control UpdatesCheckBox()
+    {
+        var box = new ThemedCheckBox
+        {
+            Text = "Check for updates automatically (once a day, from GitHub)", AutoSize = true, Margin = new Padding(0, 10, 0, 2),
+            Checked = _settings.CheckForUpdates && !Updater.DisabledByPolicy, Enabled = !Updater.DisabledByPolicy,
+        };
+        box.CheckedChanged += (_, _) => { _settings.CheckForUpdates = box.Checked; _settings.Save(); };
+        if (!Updater.DisabledByPolicy) return box;
+        var panel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+        panel.Controls.Add(box);
+        panel.Controls.Add(Muted("Turned off by your administrator."));
+        return panel;
     }
 
     private static FlowLayoutPanel ButtonRow(params Control[] buttons)
@@ -994,6 +1012,8 @@ internal sealed class SettingsForm : Form
 
             Heading("Links"),
             Link("What's new in this version", ShowChangelog),
+            UpdatesCheckBox(),
+            Link("Check for updates now", () => { UpdateCheckRequested = true; Close(); }),
             Link("Open the log folder", () => OpenPath(Log.Dir)),
             Link("Open the settings folder", () => OpenPath(AppSettings.Folder)),
             Link("Open the bundled tools folder (includes their licences)", () =>

@@ -139,6 +139,13 @@ internal sealed class AppSettings
     public int DockHeight { get; set; } = 260;
     /// <summary>Open new shells and SSH sessions in the docked panel instead of a tab.</summary>
     public bool DockNewTerminals { get; set; }
+    /// <summary>Check GitHub for a newer release (at most daily). An administrator can turn this off by policy.</summary>
+    public bool CheckForUpdates { get; set; } = true;
+    /// <summary>A release the user chose to skip ("Skip this version"), e.g. "3.2.1".</summary>
+    public string SkippedVersion { get; set; } = "";
+    public DateTime LastUpdateCheck { get; set; } = DateTime.MinValue;
+    /// <summary>New server: the choices last used per region, offered again next time.</summary>
+    public Dictionary<string, LaunchDefault> LaunchDefaults { get; set; } = new();
     /// <summary>Check the AWS sign-in in the background and renew it before it runs out.</summary>
     public bool KeepSignedIn { get; set; } = true;
     /// <summary>Remove the profile's AWS keys when the app closes.</summary>
@@ -277,4 +284,15 @@ internal static class Log
         }
         catch { }
     }
+}
+
+/// <summary>New server: what was used last time in a region (each may be empty).</summary>
+internal sealed class LaunchDefault
+{
+    public string SubnetId { get; set; } = "";
+    public List<string> SecurityGroupIds { get; set; } = new();
+    public string InstanceProfile { get; set; } = "";
+    public string InstanceType { get; set; } = "";
+    public string KeyName { get; set; } = "";
+    public string DiskType { get; set; } = "";
 }
