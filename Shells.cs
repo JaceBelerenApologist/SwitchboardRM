@@ -54,17 +54,54 @@ internal static class Shells
 
     private static string FindPwsh()
     {
+        string pf = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "PowerShell", "7", "pwsh.exe");
+        return FindOnPath("pwsh.exe") ?? (File.Exists(pf) ? pf : null);
+    }
+
+    /// <summary>A program on PATH (the app's own PATH, as it was when Switchboard started), or null.</summary>
+    private static string FindOnPath(string file)
+    {
         foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
         {
             try
             {
-                string f = Path.Combine(dir.Trim('"'), "pwsh.exe");
+                string f = Path.Combine(dir.Trim('"'), file);
                 if (File.Exists(f)) return f;
             }
             catch { }
         }
-        string pf = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "PowerShell", "7", "pwsh.exe");
-        return File.Exists(pf) ? pf : null;
+        return null;
+    }
+
+    /// <summary>
+    /// Claude Code (Anthropic's command-line agent), if it's installed: the native installer's claude.exe (on PATH, or
+    /// in %USERPROFILE%\.local\bin, where it installs, in case PATH hasn't caught up since), or an npm install's
+    /// claude.cmd. Null if it isn't installed. Not one of Available()'s shells: menus list it in its own group.
+    /// </summary>
+    public static ShellInfo ClaudeCode()
+    {
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string native = Path.Combine(home, ".local", "bin", "claude.exe");
+        string npm = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm", "claude.cmd");
+        string path = FindOnPath("claude.exe") ?? (File.Exists(native) ? native : null)
+                      ?? FindOnPath("claude.cmd") ?? (File.Exists(npm) ? npm : null);
+        if (path == null) return null;
+
+        // a .cmd needs cmd.exe to run it; an .exe runs directly
+        string command = path.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase)
+            ? Quote(Environment.GetEnvironmentVariable("ComSpec") is { Length: > 0 } c ? c : Path.Combine(Environment.SystemDirectory, "cmd.exe")) +
+              " /c " + Quote(path)
+            : Quote(path);
+        return new ShellInfo("claude-code", "Claude Code", command);
+    }
+
+    /// <summary>Anthropic's Claude Code installer, run in PowerShell (shown in a tab so it can be watched).</summary>
+    public static ShellInfo ClaudeCodeInstaller()
+    {
+        var ps = Find("pwsh") ?? Find("powershell");
+        string exe = ps?.CommandLine.Split(" -NoLogo")[0] ?? Quote(Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"));
+        return new ShellInfo("claude-code-install", "Installing Claude Code",
+            exe + " -NoLogo -NoProfile -ExecutionPolicy Bypass -Command \"irm https://claude.ai/install.ps1 | iex\"");
     }
 
     /// <summary>List WSL distributions once, in the background ("wsl --list --quiet" prints UTF-16).</summary>

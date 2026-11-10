@@ -34,6 +34,8 @@ ordinary RDP and SSH connections (or imports them from RDCMan, mRemoteNG, `.rdp`
 - Terminals can be docked in a resizable panel under the tabs, next to a remote desktop.
 - Windows sign-in windows (WAM) appear for commands like `Connect-MgGraph` in the terminals, using Microsoft's ConPTY
   bundled in `tools\conpty`.
+- Claude in the shell menus: Claude Code (Anthropic's command-line agent) in a terminal tab, with an installer if
+  it's missing, and claude.ai in a tab, signed in with your own account.
 - Local shells in tabs too: Command Prompt, Windows PowerShell, PowerShell 7, Git Bash and WSL (when installed),
   with `AWS_PROFILE` and the bundled AWS tools already set up.
 

@@ -14,6 +14,7 @@ internal sealed class Session
     public Tunnel Tunnel;
     public RdpHost Rdp;          // Remote Desktop sessions
     public TerminalHost Term;    // SSH sessions and local shells
+    public ClaudeWebHost Web;    // the claude.ai tab (a page, not a terminal)
     public bool Docked;          // in the docked-terminal panel under the tabs, not a tab of its own
     public TabPage Page;
     public DateTime Started = DateTime.Now;
@@ -652,6 +653,7 @@ internal sealed class MainForm : Form
             var sel = _sessions.FirstOrDefault(x => x.Page == _tabs.SelectedTab);
             sel?.Rdp?.SyncSize();
             sel?.Term?.FocusTerminal();
+            sel?.Web?.FocusPage();
             if (sel?.Rdp != null) { try { sel.Rdp.Focus(); } catch { } }
             _tabKeys?.Install();
         };
@@ -711,11 +713,11 @@ internal sealed class MainForm : Form
     protected override async void OnFormClosing(FormClosingEventArgs e)
     {
         if (_closeReady) { base.OnFormClosing(e); return; }
-        int remote = _sessions.Count(x => x.Kind != Protocol.Local), shells = _sessions.Count - remote;
+        int remote = _sessions.Count(x => x.Kind != Protocol.Local), shells = _sessions.Count(x => x.Kind == Protocol.Local && x.Web == null);
         string open = remote > 0 && shells > 0 ? $"{remote} remote session(s) and {shells} shell(s) are open"
                     : remote > 0 ? $"{remote} remote session(s) are open"
                     : $"{shells} shell(s) are open";
-        if (_sessions.Count > 0 && !Ask($"{open}. Close them and exit?"))
+        if (remote + shells > 0 && !Ask($"{open}. Close them and exit?"))
         {
             e.Cancel = true;
             return;
@@ -1203,6 +1205,7 @@ internal sealed class MainForm : Form
     private void CloseWithConfirm(Session s)
     {
         if (s == null) return;
+        if (s.Web != null) { CloseSession(s); return; }   // a web page: nothing running to lose
         string question = s.Kind == Protocol.Local
             ? $"Close {s.Inst.Name}?\n\nAnything still running in it will stop."
             : $"Disconnect from {s.Inst.Name}?\n\nThe server keeps running; only this tab closes.";
@@ -1371,6 +1374,15 @@ internal sealed class MainForm : Form
             item.Click += async (_, _) => await OpenShellAsync(chosen, docked);
             items.Add(item);
         }
+
+        // Claude: Claude Code in a terminal (or its installer), and claude.ai in a tab
+        items.Add(new ToolStripSeparator());
+        var claudeCode = Shells.ClaudeCode();
+        items.Add(claudeCode != null
+            ? new ToolStripMenuItem("Claude Code", null, async (_, _) => await OpenShellAsync(claudeCode, docked))
+            : new ToolStripMenuItem("Install Claude Code ...", null, async (_, _) => await InstallClaudeCodeAsync(docked)));
+        items.Add(new ToolStripMenuItem("Claude (claude.ai)", null, async (_, _) => await OpenClaudeWebAsync()));
+
         Theme.ApplyMenu(owner);
         if (refresh) RefreshShellMenu(items, owner, docked, withConnect);
     }
@@ -1408,6 +1420,53 @@ internal sealed class MainForm : Form
         bool powershell = shell.Id is "pwsh" or "powershell";
         if (!powershell || !_settings.StylePowerShell || Theme.TerminalScheme == null) return shell.CommandLine;
         return shell.CommandLine + " -NoExit -EncodedCommand " + TerminalSchemes.EncodedStyling(Theme.TerminalScheme);
+    }
+
+    /// <summary>Claude Code isn't installed: offer Anthropic's installer, run in a tab so it can be watched.</summary>
+    private async Task InstallClaudeCodeAsync(bool docked)
+    {
+        if (!Ask("Claude Code isn't installed on this PC.\n\nInstall it now with Anthropic's installer " +
+                 "(irm https://claude.ai/install.ps1 | iex)? It runs in a tab here. When it's done, Claude Code is in this " +
+                 "menu; it needs a Claude Pro, Max, Team or Enterprise plan, or an Anthropic Console account, to sign in.")) return;
+        await OpenShellAsync(Shells.ClaudeCodeInstaller(), docked);
+    }
+
+    /// <summary>The claude.ai tab: switch to it if it's open, otherwise open it.</summary>
+    private async Task OpenClaudeWebAsync()
+    {
+        var open = _sessions.FirstOrDefault(x => x.Web != null);
+        if (open != null)
+        {
+            _tabs.SelectedTab = open.Page;
+            open.Web.FocusPage();
+            return;
+        }
+
+        var inst = new Instance { Name = "Claude", Id = "claude-web", Type = "claude-web" };
+        var page = new TabPage("Claude") { BackColor = Theme.Current.Back };
+        var web = new ClaudeWebHost { Dock = DockStyle.Fill };
+        page.Controls.Add(web);
+        var session = new Session { Inst = inst, Kind = Protocol.Local, Page = page, Web = web };
+        _sessions.Add(session);
+        _tabs.TabPages.Add(page);
+        _tabs.Visible = true;
+        _hint.Visible = false;
+        _tabs.SelectedTab = page;
+        try
+        {
+            await web.StartAsync();
+            web.FocusPage();
+            SetStatus("Opened claude.ai");
+        }
+        catch (Exception ex)
+        {
+            Log.Write("claude.ai tab failed to load: " + ex);
+            CloseSession(session);
+            MessageBox.Show(this, ex is Microsoft.Web.WebView2.Core.WebView2RuntimeNotFoundException
+                    ? "The Microsoft Edge WebView2 Runtime isn't installed, and the claude.ai tab needs it."
+                    : "Couldn't open claude.ai: " + ex.Message,
+                "Claude", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
     }
 
     /// <summary>Open a local shell in a new tab, starting in the user folder.</summary>
@@ -1705,6 +1764,7 @@ internal sealed class MainForm : Form
         _sessions.Remove(s);
         try { s.Rdp?.SafeDisconnect(); } catch { }
         try { s.Term?.Dispose(); } catch { }  // ends ssh
+        try { s.Web?.Dispose(); } catch { }
         if (s.Inst?.Saved != null) _adHocPasswords.Remove(s.Inst.Saved.Id);
         try { (s.Docked ? _dockTabs : _tabs).TabPages.Remove(s.Page); } catch { }
         try { s.Page.Dispose(); } catch { }

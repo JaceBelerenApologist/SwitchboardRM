@@ -3,6 +3,17 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.1.0 (2026-11-15)
+
+- Claude in the shell menus (the terminal button's arrow, the + menus, File > Open shell), in a group of its own:
+  - Claude Code, Anthropic's command-line agent, in a terminal tab when it's installed (native installer or npm). It
+    starts in your user folder with the same environment as Switchboard's shells, AWS_PROFILE included. If it isn't
+    installed, "Install Claude Code ..." runs Anthropic's installer in a tab, after asking.
+  - Claude (claude.ai): the Claude website in a tab, signed in with your own account and remembered in a private
+    browser profile. Choosing it again switches to the open tab. Sign-in pop-ups (Google, Microsoft, Apple) open as
+    pop-ups; other links open in your normal browser. It closes without asking and isn't counted as an open shell
+    when Switchboard exits.
+
 ## 3.0.2 (2026-11-14)
 
 - WSL distributions installed or removed while Switchboard is running now show up in the shell menus (the terminal
