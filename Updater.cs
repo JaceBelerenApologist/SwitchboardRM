@@ -177,6 +177,9 @@ internal static class Updater
     /// </summary>
     public static string SignatureProblem(string setup)
     {
+        // CreateFromSignedFile is marked obsolete (SYSLIB0057), but it's still the only built-in way to read the signer
+        // certificate of a signed .exe; its suggested replacement, X509CertificateLoader, only reads certificate files.
+#pragma warning disable SYSLIB0057
         X509Certificate2 mine;
         try { mine = new X509Certificate2(X509Certificate.CreateFromSignedFile(Environment.ProcessPath!)); }
         catch { return "this copy of Switchboard isn't signed, so there's nothing to check the update's signature against"; }
@@ -184,6 +187,7 @@ internal static class Updater
         X509Certificate2 theirs;
         try { theirs = new X509Certificate2(X509Certificate.CreateFromSignedFile(setup)); }
         catch { return "the downloaded setup isn't signed"; }
+#pragma warning restore SYSLIB0057
 
         uint result = VerifyFile(setup);
         bool intact = result is 0 or CERT_E_UNTRUSTEDROOT or CERT_E_CHAINING;

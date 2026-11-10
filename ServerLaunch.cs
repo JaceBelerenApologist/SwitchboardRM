@@ -1,7 +1,7 @@
 using Amazon.EC2;
 using Amazon.EC2.Model;
-using Amazon.IdentityManagement;
-using Amazon.SimpleSystemsManagement;
+// Only EC2's namespace is imported: Systems Manager's and IAM's have types with the same names (ResourceType ...),
+// so their clients are written out in full and their models go through the Ssm / Iam aliases.
 using Ssm = Amazon.SimpleSystemsManagement.Model;
 using Iam = Amazon.IdentityManagement.Model;
 // WinForms projects import System.Drawing everywhere, which also has an Image: this one is the AWS image (AMI)
@@ -87,7 +87,7 @@ internal static class ServerLaunch
     public static async Task<List<ImageChoice>> ImagesAsync(string profile, string region, CancellationToken ct)
     {
         var creds = Aws.Credentials(profile);
-        using var ssm = new AmazonSimpleSystemsManagementClient(creds, Aws.Region(region));
+        using var ssm = new Amazon.SimpleSystemsManagement.AmazonSimpleSystemsManagementClient(creds, Aws.Region(region));
         using var ec2 = new AmazonEC2Client(creds, Aws.Region(region));
 
         // name -> AMI ID from the public parameters
@@ -274,7 +274,7 @@ internal static class ServerLaunch
     /// </summary>
     public static async Task<List<NamedChoice>> InstanceProfilesAsync(string profile, CancellationToken ct)
     {
-        using var iam = new AmazonIdentityManagementServiceClient(Aws.Credentials(profile), Amazon.RegionEndpoint.USEast1);
+        using var iam = new Amazon.IdentityManagement.AmazonIdentityManagementServiceClient(Aws.Credentials(profile), Amazon.RegionEndpoint.USEast1);
         var result = new List<NamedChoice>();
         string marker = null;
         do
@@ -348,7 +348,7 @@ internal static class ServerLaunch
         var request = new RunInstancesRequest
         {
             ImageId = spec.ImageId,
-            InstanceType = InstanceType.FindValue(spec.InstanceType),
+            InstanceType = Amazon.EC2.InstanceType.FindValue(spec.InstanceType),
             MinCount = 1,
             MaxCount = 1,
             NetworkInterfaces = new List<InstanceNetworkInterfaceSpecification>
@@ -364,14 +364,14 @@ internal static class ServerLaunch
             },
             TagSpecifications = new List<TagSpecification>
             {
-                new() { ResourceType = ResourceType.Instance, Tags = tags },
-                new() { ResourceType = ResourceType.Volume, Tags = tags },
+                new() { ResourceType = Amazon.EC2.ResourceType.Instance, Tags = tags },
+                new() { ResourceType = Amazon.EC2.ResourceType.Volume, Tags = tags },
             },
             // instance metadata with tokens only (IMDSv2): AWS's recommended setting
             MetadataOptions = new InstanceMetadataOptionsRequest
             {
-                HttpTokens = HttpTokensState.Required,
-                HttpEndpoint = InstanceMetadataEndpointState.Enabled,
+                HttpTokens = Amazon.EC2.HttpTokensState.Required,
+                HttpEndpoint = Amazon.EC2.InstanceMetadataEndpointState.Enabled,
             },
         };
         if (spec.InstanceProfile.Length > 0) request.IamInstanceProfile = new IamInstanceProfileSpecification { Name = spec.InstanceProfile };
@@ -383,7 +383,7 @@ internal static class ServerLaunch
                 new()
                 {
                     DeviceName = spec.RootDevice,
-                    Ebs = new EbsBlockDevice { VolumeSize = spec.DiskGb, VolumeType = VolumeType.FindValue(spec.DiskType), DeleteOnTermination = true },
+                    Ebs = new EbsBlockDevice { VolumeSize = spec.DiskGb, VolumeType = Amazon.EC2.VolumeType.FindValue(spec.DiskType), DeleteOnTermination = true },
                 },
             };
         }

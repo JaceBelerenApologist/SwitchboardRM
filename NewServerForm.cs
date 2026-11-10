@@ -266,8 +266,8 @@ internal sealed class NewServerForm : Form
         if (image.RootSizeGb > 0)
         {
             _diskGb.Minimum = image.RootSizeGb;
-            int want = _clone != null && SelectedRegion == _clone.Region && _clone.DiskGb > 0 ? _clone.DiskGb : Math.Max(image.RootSizeGb, (int)_diskGb.Value);
-            _diskGb.Value = Math.Max(image.RootSizeGb, Math.Min(want, (int)_diskGb.Maximum));
+            int wantDisk = _clone != null && SelectedRegion == _clone.Region && _clone.DiskGb > 0 ? _clone.DiskGb : Math.Max(image.RootSizeGb, (int)_diskGb.Value);
+            _diskGb.Value = Math.Max(image.RootSizeGb, Math.Min(wantDisk, (int)_diskGb.Maximum));
         }
 
         string key = SelectedRegion + "|" + image.Architecture;
