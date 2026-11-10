@@ -1361,6 +1361,9 @@ internal sealed class MainForm : Form
         bool refresh = true)
     {
         items.Clear();
+        // the menu bar's font (the app font): the toolbar terminal button's dropdown would otherwise inherit the
+        // button's icon font, which has no letters, so Windows drew its text in a fallback font instead
+        owner.Font = _menu.Font;
         if (withConnect)
         {
             items.Add(new ToolStripMenuItem("Remote Desktop to a computer ...", null, async (_, _) => await ConnectAdHocAsync()));

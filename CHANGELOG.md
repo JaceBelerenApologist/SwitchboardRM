@@ -3,6 +3,10 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.1.1 (2026-11-15)
+
+- Fixed: the toolbar terminal button's dropdown didn't use the app font (Settings > Appearance) like the other menus.
+
 ## 3.1.0 (2026-11-15)
 
 - Claude in the shell menus (the terminal button's arrow, the + menus, File > Open shell), in a group of its own:
