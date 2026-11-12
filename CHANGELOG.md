@@ -3,6 +3,17 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.4.0 (2026-11-18)
+
+- System tray options (Settings > Appearance > Window), both off by default: Minimize to the system tray, and Close to
+  the system tray (the close button keeps Switchboard running). Sessions, tunnels and sign-in renewal carry on in the
+  tray. Click the tray icon to open the window again (as it was, maximized included); right-click it for Open or
+  Exit. Exit (tray menu or File) really closes, with the usual question about open sessions; Windows shutting down,
+  signing out and updates close it normally.
+- The first time the close button is used, Switchboard asks whether to keep running in the tray or exit, with
+  "Don't ask me again" (which sets the option) and a note that it can be changed in Settings. Without the tick, the
+  answer is for that time only. Choosing the option in Settings means it isn't asked.
+
 ## 3.3.0 (2026-11-17)
 
 - New server is now a four-screen wizard (Back / Next):

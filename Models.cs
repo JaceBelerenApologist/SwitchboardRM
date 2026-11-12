@@ -141,6 +141,14 @@ internal sealed class AppSettings
     public bool DockNewTerminals { get; set; }
     /// <summary>Check GitHub for a newer release (at most daily). An administrator can turn this off by policy.</summary>
     public bool CheckForUpdates { get; set; } = true;
+    /// <summary>Minimizing hides the window to the system tray instead of the taskbar.</summary>
+    public bool MinimizeToTray { get; set; }
+    /// <summary>The window's close button hides it to the system tray; Exit (tray menu or File) really closes.</summary>
+    public bool CloseToTray { get; set; }
+    /// <summary>The user has chosen what the close button does ("Don't ask me again", or the option in Settings).</summary>
+    public bool CloseChoiceMade { get; set; }
+    /// <summary>The "still running in the tray" notification has been shown once.</summary>
+    public bool TrayHintShown { get; set; }
     /// <summary>A release the user chose to skip ("Skip this version"), e.g. "3.2.1".</summary>
     public string SkippedVersion { get; set; } = "";
     public DateTime LastUpdateCheck { get; set; } = DateTime.MinValue;

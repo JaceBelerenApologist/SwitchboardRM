@@ -38,6 +38,7 @@ ordinary RDP and SSH connections (or imports them from RDCMan, mRemoteNG, `.rdp`
   for the image (current AWS Windows/Linux or your own), instance type with its on-demand price, disks, full network
   control (specific private IPs, secondary IPs, IPv6, several network interfaces, tenancy, placement group, hostname),
   instance profile (Session Manager checked), protections, metadata and user data, with a costed review before launch.
+- Minimize or close to the system tray (Settings > Appearance), keeping sessions and sign-in renewal running.
 - Updates itself: a daily check of GitHub releases, and a verified, silent update for installed copies. Turn it off
   in Settings > About, or for everyone with `DisableUpdateCheck = 1` (DWORD) under
   `HKLM\SOFTWARE\Policies\SwitchboardRM`.

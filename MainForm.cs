@@ -172,6 +172,11 @@ internal sealed class MainForm : Form
     private readonly LinkLabel _updateSkip = new() { Text = "Skip this version", AutoSize = true, Margin = new Padding(0, 9, 14, 0) };
     private UpdateInfo _update;
     private bool _updating;   // closing to install an update: no questions, and stay signed in for the restart
+
+    // system tray (Settings > Appearance > Window)
+    private readonly NotifyIcon _tray = new() { Text = AppInfo.Name };
+    private bool _exitRequested;   // Exit from the tray or File menu: really close, even with "close to tray" on
+    private FormWindowState _restoreState = FormWindowState.Normal;
     private readonly ToolStripMenuItem _miClone = new("New server &like this one ...");
 
     // "it's working" indicators
@@ -326,7 +331,7 @@ internal sealed class MainForm : Form
         file.DropDownItems.Add(ImportMenu());
         file.DropDownItems.Add(new ToolStripMenuItem("Open &log folder", null, (_, _) => OpenLogs()));
         file.DropDownItems.Add(new ToolStripSeparator());
-        file.DropDownItems.Add(new ToolStripMenuItem("E&xit", null, (_, _) => Close()));
+        file.DropDownItems.Add(new ToolStripMenuItem("E&xit", null, (_, _) => ExitApp()));
 
         var view = new ToolStripMenuItem("&View");
         view.DropDownItems.Add(_miViewAws);
@@ -543,6 +548,7 @@ internal sealed class MainForm : Form
 
         _split.Dock = DockStyle.Fill;
         BuildUpdateBanner();
+        BuildTray();
         Controls.Add(_updateBanner); // added before the toolbar, so it docks below it
         Controls.Add(_tool);
         Controls.Add(_menu);        // added after the toolbar so it docks above it
@@ -740,6 +746,23 @@ internal sealed class MainForm : Form
     protected override async void OnFormClosing(FormClosingEventArgs e)
     {
         if (_closeReady) { base.OnFormClosing(e); return; }
+        // the close button: to the tray, or (until the user has chosen) ask. Never for Exit, an update, sign-out or shutdown.
+        if (!_exitRequested && !_updating && e.CloseReason == CloseReason.UserClosing)
+        {
+            bool toTray = _settings.CloseToTray;
+            if (!toTray && !_settings.CloseChoiceMade)
+            {
+                var choice = AskCloseChoice();
+                if (choice == CloseChoice.Cancel) { e.Cancel = true; return; }
+                toTray = choice == CloseChoice.Tray;
+            }
+            if (toTray)
+            {
+                e.Cancel = true;
+                HideToTray(closing: true);
+                return;
+            }
+        }
         int remote = _sessions.Count(x => x.Kind != Protocol.Local), shells = _sessions.Count(x => x.Kind == Protocol.Local && x.Web == null);
         string open = remote > 0 && shells > 0 ? $"{remote} remote session(s) and {shells} shell(s) are open"
                     : remote > 0 ? $"{remote} remote session(s) are open"
@@ -1499,6 +1522,105 @@ internal sealed class MainForm : Form
         }
     }
 
+    // ---------------------------------------------------------------- system tray
+
+    private void BuildTray()
+    {
+        _tray.Icon = AppIcon.Icon;
+        var menu = new ContextMenuStrip();
+        menu.Items.Add(new ToolStripMenuItem("&Open Switchboard", null, (_, _) => RestoreFromTray()) { Font = new Font(menu.Font, FontStyle.Bold) });
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(new ToolStripMenuItem("E&xit", null, (_, _) => ExitApp()));
+        menu.Opening += (_, _) => Theme.ApplyMenu(menu);
+        _tray.ContextMenuStrip = menu;
+        _tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) RestoreFromTray(); };
+        _tray.BalloonTipClicked += (_, _) => RestoreFromTray();
+
+        // minimize to tray; remember how the window was, to bring it back the same way
+        Resize += (_, _) =>
+        {
+            if (WindowState == FormWindowState.Minimized)
+            {
+                if (_settings.MinimizeToTray && Visible) HideToTray(closing: false);
+            }
+            else _restoreState = WindowState;
+        };
+        UpdateTrayIcon();
+    }
+
+    /// <summary>The tray icon shows while either tray option is on (so it can always be found), or while the window is hidden.</summary>
+    private void UpdateTrayIcon() => _tray.Visible = _settings.MinimizeToTray || _settings.CloseToTray || !Visible;
+
+    private void HideToTray(bool closing)
+    {
+        Hide();
+        _tray.Visible = true;
+        if (_settings.TrayHintShown) return;
+        _settings.TrayHintShown = true;
+        _settings.Save();
+        _tray.ShowBalloonTip(6000, $"{AppInfo.Name} is still running",
+            (closing ? "Closing the window keeps it running here in the system tray" : "Minimized to the system tray") +
+            ": click the icon to open it, or right-click > Exit to close it.", ToolTipIcon.Info);
+    }
+
+    private void RestoreFromTray()
+    {
+        Show();
+        if (WindowState == FormWindowState.Minimized) WindowState = _restoreState;
+        ShowInTaskbar = true;
+        Activate();
+        UpdateTrayIcon();
+    }
+
+    private enum CloseChoice { Tray, Exit, Cancel }
+
+    /// <summary>
+    /// The first time the close button is used (and the user hasn't chosen in Settings): keep running in the tray, or
+    /// exit? With "Don't ask me again" the answer becomes the Close to the system tray setting; without it, it's for
+    /// this time only.
+    /// </summary>
+    private CloseChoice AskCloseChoice()
+    {
+        var tray = new TaskDialogButton("Keep running in the tray");
+        var exit = new TaskDialogButton("Exit");
+        var page = new TaskDialogPage
+        {
+            Caption = AppInfo.Name,
+            Heading = "Keep Switchboard running in the system tray?",
+            Text = "It can keep running in the tray when you close the window: sessions, tunnels and sign-in renewal carry on, " +
+                   "and the tray icon opens it again. Or it can exit.",
+            Icon = TaskDialogIcon.Information,
+            Buttons = { tray, exit, TaskDialogButton.Cancel },
+            DefaultButton = tray,
+            Verification = new TaskDialogVerificationCheckBox("Don't ask me again"),
+            Footnote = new TaskDialogFootnote("You can change this later in Settings > Appearance > Window."),
+        };
+        var result = TaskDialog.ShowDialog(this, page);
+        var choice = result == tray ? CloseChoice.Tray : result == exit ? CloseChoice.Exit : CloseChoice.Cancel;
+        if (choice == CloseChoice.Cancel) return choice;
+
+        if (choice == CloseChoice.Tray) _settings.TrayHintShown = true;   // just explained: no notification needed
+        if (page.Verification.Checked)
+        {
+            _settings.CloseToTray = choice == CloseChoice.Tray;
+            _settings.CloseChoiceMade = true;
+            Log.Write($"Close button set to {(choice == CloseChoice.Tray ? "keep running in the tray" : "exit")} (don't ask again)");
+        }
+        _settings.Save();
+        UpdateTrayIcon();
+        return choice;
+    }
+
+    /// <summary>Exit (tray menu or File): really close, with the usual questions about open sessions.</summary>
+    private void ExitApp()
+    {
+        _exitRequested = true;
+        if (!Visible) RestoreFromTray();   // so the "close open sessions?" question has a window to belong to
+        Close();
+        // if the question was answered "no", the next close button press follows the tray option again
+        if (!IsDisposed) BeginInvoke(() => _exitRequested = false);
+    }
+
     // ---------------------------------------------------------------- new server
 
     /// <summary>AWS > New server (from == null), or "New server like this one" from an EC2 server.</summary>
@@ -2064,6 +2186,7 @@ internal sealed class MainForm : Form
         using var f = new SettingsForm(_settings, Profile, _cboProfile.Items.Cast<object>().Select(o => o.ToString()).Where(o => o != AddProfileItem), ApplyAppearance, page,
             awsSessionsOpen: _sessions.Any(x => x.Tunnel != null));
         f.ShowDialog(this);
+        UpdateTrayIcon();
         if (_settings.KeepSignedIn != keepBefore) await SetKeepSignedInAsync(_settings.KeepSignedIn);
 
         bool profileChanged = f.SelectedProfile.Length > 0 &&
@@ -2179,6 +2302,8 @@ internal sealed class MainForm : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        _tray.Visible = false;
+        _tray.Dispose();
         // SystemEvents are static: leaving these attached would keep the window alive and call into it after closing
         SystemEvents.SessionSwitch -= OnSessionSwitch;
         _tabKeys?.Dispose();

@@ -308,6 +308,13 @@ internal sealed class SettingsForm : Form
         SyncProfileButtons();
     }
 
+    private ThemedCheckBox TrayCheckBox(string text, Func<bool> get, Action<bool> set)
+    {
+        var box = new ThemedCheckBox { Text = text, AutoSize = true, Checked = get(), Margin = new Padding(0, 8, 0, 2) };
+        box.CheckedChanged += (_, _) => { set(box.Checked); _settings.Save(); };
+        return box;
+    }
+
     /// <summary>About: daily update checks on or off (shown greyed out when an administrator turned them off).</summary>
     private Control UpdatesCheckBox()
     {
@@ -882,6 +889,13 @@ internal sealed class SettingsForm : Form
             FieldLabel("Server list text size"), _cboListSize,
             FieldLabel("Terminal font (SSH)"), _cboTermFont,
             FieldLabel("Terminal text size"), _cboTermSize,
+
+            Heading("Window"),
+            TrayCheckBox("Minimize to the system tray", () => _settings.MinimizeToTray, v => _settings.MinimizeToTray = v),
+            TrayCheckBox("Close to the system tray (the close button keeps Switchboard running)", () => _settings.CloseToTray,
+                v => { _settings.CloseToTray = v; _settings.CloseChoiceMade = true; }),   // chosen here: the close button doesn't ask
+            Muted("Switchboard keeps running in the tray: sessions, tunnels and sign-in renewal carry on. Click its tray icon " +
+                  "to open it again; Exit (in the tray icon's menu or the File menu) closes it."),
 
             Heading("Terminal colours"),
             Muted("The colour scheme for SSH and shell tabs: background, text, and the 16 colours every console " +
