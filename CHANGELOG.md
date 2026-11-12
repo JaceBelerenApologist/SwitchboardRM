@@ -3,6 +3,25 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.3.0 (2026-11-17)
+
+- New server is now a four-screen wizard (Back / Next):
+  1. Server: region, image, instance type with its on-demand price (per hour and per month, for the image's OS;
+     Windows includes its licence), name, tags, system disk and extra data disks, with the disks' monthly cost.
+  2. Network: VPC, subnet, tenancy, placement group, hostname type and DNS records, and the network interfaces. Each
+     interface: a specific primary private IPv4 or automatic, secondary IPv4s (a number or addresses), IPv6 addresses,
+     security groups, description, source/destination check, and a public IPv4 only on a single-interface server.
+     Specific addresses are checked before launch (in the subnet's range, not one of AWS's reserved addresses, not in
+     use), and "Show addresses already in use" lists the subnet's used addresses. Interfaces are limited to what the
+     instance type allows.
+  3. Access and protection: instance profile (Session Manager checked), key pair, termination and stop protection,
+     what an OS shutdown does, detailed monitoring, metadata tokens and hop limit, and user data.
+  4. Review: everything, with the estimated cost (instance + disks, on-demand list price in USD; discounts not
+     included), then Launch.
+- New server like this one copies all of that from the server, including its interfaces and data disks, but never
+  its addresses.
+- Prices come from the AWS Pricing API (needs pricing:GetProducts) and are kept for three days.
+
 ## 3.2.0 (2026-11-16)
 
 - New server (AWS > New server): create an EC2 server from one screen. Image: AWS's current Windows Server, Amazon

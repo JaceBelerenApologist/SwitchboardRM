@@ -11,7 +11,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <!-- Version: bump this for each release (PATCH = fixes, MINOR = features, MAJOR = breaking changes)
          and add a section to CHANGELOG.md. Shown on Settings > About and in the .exe's Properties > Details. -->
-    <Version>3.2.0</Version>
+    <Version>3.3.0</Version>
     <Product>Switchboard Remote Manager</Product>
     <Copyright>© 2026 Nick Morrissey</Copyright>
     <Description>Switchboard Remote Manager</Description>
@@ -95,6 +95,8 @@
     <PackageReference Include="AWSSDK.SecurityToken" Version="4.*" />
     <!-- New server: listing instance profiles and checking them for Session Manager permissions -->
     <PackageReference Include="AWSSDK.IdentityManagement" Version="4.*" />
+    <!-- New server: on-demand prices for instance types and disks -->
+    <PackageReference Include="AWSSDK.Pricing" Version="4.*" />
     <!-- Only used by profiles that sign in with IAM Identity Center (SSO). -->
     <PackageReference Include="AWSSDK.SSO" Version="4.*" />
     <PackageReference Include="AWSSDK.SSOOIDC" Version="4.*" />

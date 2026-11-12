@@ -34,9 +34,10 @@ ordinary RDP and SSH connections (or imports them from RDCMan, mRemoteNG, `.rdp`
 - Terminals can be docked in a resizable panel under the tabs, next to a remote desktop.
 - Windows sign-in windows (WAM) appear for commands like `Connect-MgGraph` in the terminals, using Microsoft's ConPTY
   bundled in `tools\conpty`.
-- New EC2 servers from the app (AWS > New server, or "New server like this one" from an existing server): current
-  AWS Windows/Linux images or your own, instance type, network, security groups, instance profile (Session Manager
-  checked), disk, name and tags, with a review before launching.
+- New EC2 servers from the app (AWS > New server, or "New server like this one" from an existing server): a wizard
+  for the image (current AWS Windows/Linux or your own), instance type with its on-demand price, disks, full network
+  control (specific private IPs, secondary IPs, IPv6, several network interfaces, tenancy, placement group, hostname),
+  instance profile (Session Manager checked), protections, metadata and user data, with a costed review before launch.
 - Updates itself: a daily check of GitHub releases, and a verified, silent update for installed copies. Turn it off
   in Settings > About, or for everyone with `DisableUpdateCheck = 1` (DWORD) under
   `HKLM\SOFTWARE\Policies\SwitchboardRM`.

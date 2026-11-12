@@ -1505,7 +1505,7 @@ internal sealed class MainForm : Form
     private async Task OpenNewServerAsync(Instance from)
     {
         if (string.IsNullOrEmpty(Profile)) { SetStatus("Choose an AWS profile and sign in first."); return; }
-        CloneSource clone = null;
+        LaunchSpec clone = null;
         if (from != null)
         {
             SetStatus($"Reading {from.Name}'s settings ...");
@@ -1528,6 +1528,10 @@ internal sealed class MainForm : Form
 
         SetStatus($"Launched {f.LaunchedName} ({f.LaunchedId}) in {f.LaunchedRegion}. It's in the list now; Connect works once " +
                   "Session Manager reports it online, usually within a few minutes.");
+        if (f.LaunchWarning.Length > 0)
+            MessageBox.Show(this, $"{f.LaunchedName} was launched, but {f.LaunchWarning}. You can change that in the AWS console " +
+                                  "(the network interface's Actions > Change source/dest. check).", "New server",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
         await RefreshAsync();
     }
 

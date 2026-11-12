@@ -122,7 +122,7 @@ Runs on `windows-latest`.
 | `PseudoConsole.cs` | ConPTY: Microsoft `conpty.dll` (with `ConptyReparentPseudoConsole` → WAM works) or built-in fallback; env block, working dir, job object, suspended start |
 | `Shells.cs` | Shell discovery (cmd, Windows PowerShell, PowerShell 7, Git Bash, WSL — re-listed on menu open, throttled), default shell, Claude Code detection + installer command |
 | `ServerLaunch.cs` | New server: curated AWS images (SSM public parameters `/aws/service/ami-windows-latest`, `ami-amazon-linux-latest`, Canonical Ubuntu) + own AMIs, instance types by architecture, VPCs/subnets/security groups, key pairs, instance profiles (IAM, flags `AmazonSSMManagedInstanceCore`), reading a server to clone, `RunInstances` (IMDSv2 required) |
-| `NewServerForm.cs` | The New server window (blank or "like this one"), remembered per-region choices (`AppSettings.LaunchDefaults`), review before launch |
+| `NewServerForm.cs` | The New server wizard: 1 Server (prices, disks), 2 Network (`InterfaceEditor` per network interface), 3 Access and protection, 4 Review (cost estimate); remembered per-region choices (`AppSettings.LaunchDefaults`) |
 | `Updater.cs` | GitHub `releases/latest` check, install detection (Inno uninstall key `{AppId}_is1`, HKLM = all users, HKCU = per user), download + size/SHA-256 check, WinVerifyTrust + same-publisher (subject + issuer) check, silent setup with `/SBUPDATE=1`; policy `DisableUpdateCheck` |
 | `ClaudeWeb.cs` | The claude.ai tab (WebView2, own profile, sign-in pop-ups kept, other links to the default browser) |
 | `TerminalSchemes.cs` | Terminal colour schemes + generated PowerShell styling (`-EncodedCommand`, avoids execution policy) |
@@ -199,8 +199,13 @@ don't), Ctrl+` dock panel. Terminals keep Ctrl+W/Ctrl+T/Ctrl+C for the shell; ap
 `terminal.html` (`appShortcut`).
 
 ### 7.7 New server and updates
-- **New server:** everything is read-only until the review is confirmed; the one write is `RunInstances` (1 instance,
-  tags on instance + volumes, IMDSv2). Needs EC2 describe/run permissions, `iam:ListInstanceProfiles`,
+- **New server:** everything is read-only until Launch on the review screen; the writes are `RunInstances` (1 instance,
+  tags on instance + volumes) and, only when an interface has source/destination check off,
+  `ModifyNetworkInterfaceAttribute` after launch (RunInstances can't set it). Specific private IPs are checked first
+  (subnet range, AWS's 5 reserved addresses, `DescribeNetworkInterfaces` for in-use). Prices: Pricing API (`us-east-1`
+  endpoint, filters `regionCode`, `operatingSystem`, `tenancy=Shared`, `preInstalledSw=NA`, `capacitystatus=Used`,
+  `licenseModel=No License required`), cached 3 days in `%LOCALAPPDATA%\SwitchboardRM\prices`. Data disks use device
+  names `xvdf…` (Windows) / `/dev/sdf…` (Linux). A public IPv4 can only be requested with a single interface. Needs EC2 describe/run permissions, `iam:ListInstanceProfiles`,
   `iam:ListAttachedRolePolicies` and `iam:PassRole`. The SDK v4 returns null for empty lists and some numbers: read
   them through the null-safe helpers in `ServerLaunch` (`L`, `N`, `B`).
 - **Updates:** automatic check at most every 20 h (first a minute after start), quiet on failure; a skipped version
@@ -347,7 +352,7 @@ Endpoint *certificate allow indicator* would use the public `.cer` (extractable 
 
 - **Built in 3.2.0:** the auto-updater and New server / New server like this one (see 7.7).
 - **New server, later:** launching several identical servers at once (a count, with numbered names) was discussed and
-  deferred; prices (AWS Pricing API) not shown.
+  deferred.
 - **SSO sign-in via the AWS SDK** (removes the bundled AWS CLI): deferred until someone with SSO can test it.
   Option meanwhile: stop bundling the CLI and use an installed one (declined for now: keep bundling).
 - **Smaller bundle:** single-file compression (`EnableCompressionInSingleFile`, ~80–100 MB off, slower first start).
