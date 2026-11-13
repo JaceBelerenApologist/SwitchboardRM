@@ -81,6 +81,20 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #1c1c21; }
     else host.postMessage({ t: 'paste' });
   });
 
+  // Switchboard reads this when closing (Settings > Terminal & SSH > also restore terminal output): the last 5,000
+  // lines of the scrollback as plain text, wrapped lines joined back together, trailing blank lines dropped
+  window.sbScrollback = () => {
+    const b = term.buffer.active, lines = [];
+    for (let i = Math.max(0, b.length - 5000); i < b.length; i++) {
+      const line = b.getLine(i);
+      if (!line) continue;
+      const text = line.translateToString(true);
+      if (line.isWrapped && lines.length) lines[lines.length - 1] += text; else lines.push(text);
+    }
+    while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
+    return lines.join('\n');
+  };
+
   host.addEventListener('message', e => {
     const m = e.data;
     if (typeof m === 'string') { term.write(m); return; }

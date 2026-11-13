@@ -115,6 +115,8 @@ internal sealed class AppSettings
     /// <summary>Font family for the app's text. Empty = Segoe UI.</summary>
     public string UiFont { get; set; } = "";
     public float ListFontSize { get; set; } = 10;
+    /// <summary>The server list's font family ("" = the same as the app font).</summary>
+    public string ListFont { get; set; } = "";
     /// <summary>Font family for SSH terminals. Empty = Cascadia Mono.</summary>
     public string TerminalFont { get; set; } = "";
     public int TerminalFontSize { get; set; } = 14;
@@ -139,10 +141,16 @@ internal sealed class AppSettings
     public int DockHeight { get; set; } = 260;
     /// <summary>Open new shells and SSH sessions in the docked panel instead of a tab.</summary>
     public bool DockNewTerminals { get; set; }
+    /// <summary>Reopen the tabs that were open when Switchboard last closed.</summary>
+    public bool RestoreTabs { get; set; } = true;
+    /// <summary>Also keep terminals' output (written to this PC until the next close) and show it again.</summary>
+    public bool RestoreScrollback { get; set; }
     /// <summary>Check GitHub for a newer release (at most daily). An administrator can turn this off by policy.</summary>
     public bool CheckForUpdates { get; set; } = true;
     /// <summary>Users recently typed in Connect as (newest first), offered in its user list.</summary>
     public List<string> RecentConnectAs { get; set; } = new();
+    /// <summary>Server window > Run command: the last scripts run (newest first).</summary>
+    public List<string> RecentCommands { get; set; } = new();
     /// <summary>Only one copy of Switchboard per Windows session: starting it again brings the open window forward.</summary>
     public bool SingleInstance { get; set; } = true;
     /// <summary>Minimizing hides the window to the system tray instead of the taskbar.</summary>

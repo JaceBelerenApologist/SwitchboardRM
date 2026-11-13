@@ -80,10 +80,14 @@ internal sealed class StartupContext : ApplicationContext
         _main.Activate();
         _splash.Close();
 
-        if (result != StartupResult.NeedsSignIn) return;
-        // "Keep me signed in" off: don't open the sign-in by ourselves; connecting to an AWS server will
-        if (_main.KeepSignedIn) await _main.SignInAsync();
-        else _main.ShowSignedOutNotice();
+        if (result == StartupResult.NeedsSignIn)
+        {
+            // "Keep me signed in" off: don't open the sign-in by ourselves; connecting to an AWS server will
+            if (_main.KeepSignedIn) await _main.SignInAsync();
+            else _main.ShowSignedOutNotice();
+        }
+        // the tabs from last time (AWS ones follow once signed in and the list has loaded)
+        await _main.RestoreTabsAsync();
     }
 
     /// <summary>

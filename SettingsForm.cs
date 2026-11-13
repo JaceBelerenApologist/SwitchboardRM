@@ -63,6 +63,7 @@ internal sealed class SettingsForm : Form
     // appearance page
     private readonly ComboBox _cboTheme = new() { Width = 220, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly ComboBox _cboUiFont = new() { Width = 260, DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly ComboBox _cboListFont = new() { Width = 260, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly ComboBox _cboListSize = new() { Width = 90, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly ComboBox _cboTermFont = new() { Width = 260, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly ComboBox _cboTermSize = new() { Width = 90, DropDownStyle = ComboBoxStyle.DropDownList };
@@ -668,6 +669,10 @@ internal sealed class SettingsForm : Form
     private readonly ThemedCheckBox _chkDockNew = new()
     { Text = "Open new terminals docked", AutoSize = true, Margin = new Padding(0, 12, 0, 2) };
     private readonly TextBox _txtSshKey = new() { Width = 380 };
+    private readonly ThemedCheckBox _chkRestoreTabs = new()
+    { Text = "Restore my tabs when Switchboard starts", AutoSize = true, Margin = new Padding(0, 12, 0, 2) };
+    private readonly ThemedCheckBox _chkRestoreOutput = new()
+    { Text = "Also restore terminal output (kept on this PC until Switchboard next closes)", AutoSize = true, Margin = new Padding(20, 4, 0, 2) };
 
     private Control BuildSshPage()
     {
@@ -707,6 +712,16 @@ internal sealed class SettingsForm : Form
 
         _chkDockNew.Checked = _settings.DockNewTerminals;
         _chkDockNew.CheckedChanged += (_, _) => { _settings.DockNewTerminals = _chkDockNew.Checked; _settings.Save(); };
+        _chkRestoreTabs.Checked = _settings.RestoreTabs;
+        _chkRestoreOutput.Checked = _settings.RestoreScrollback;
+        _chkRestoreOutput.Enabled = _settings.RestoreTabs;
+        _chkRestoreTabs.CheckedChanged += (_, _) =>
+        {
+            _settings.RestoreTabs = _chkRestoreTabs.Checked;
+            _chkRestoreOutput.Enabled = _chkRestoreTabs.Checked;
+            _settings.Save();
+        };
+        _chkRestoreOutput.CheckedChanged += (_, _) => { _settings.RestoreScrollback = _chkRestoreOutput.Checked; _settings.Save(); };
 
         string ssh = Tools.Ssh;
         page.Controls.AddRange(new Control[]
@@ -721,6 +736,11 @@ internal sealed class SettingsForm : Form
             FieldLabel("Default shell (Ctrl+T)"),
             _cboShell,
             _chkDockNew,
+            _chkRestoreTabs,
+            _chkRestoreOutput,
+            Muted("Remote Desktop and SSH tabs reconnect (up to five at start-up; any more wait for a click), shells and " +
+                  "Claude tabs reopen, and AWS tabs follow once you're signed in. Passwords typed for Connect as aren't kept. " +
+                  "Terminal output, when kept, shows dimmed above a fresh shell; what was running can't come back."),
             Muted("New shells and SSH sessions open in the docked panel under the tabs instead of in a tab of their own. " +
                   "Move back to a tab still works on any of them."),
             Muted("Terminal font and text size are under Appearance."),
@@ -810,6 +830,25 @@ internal sealed class SettingsForm : Form
             "Cascadia Mono", "Cascadia Code", "Consolas", "Lucida Console", "Courier New", "JetBrains Mono",
             "Fira Code", "Fira Mono", "Source Code Pro", "Hack", "IBM Plex Mono", "Iosevka", "Ubuntu Mono",
         });
+        // the server list: the app font by default, or any text or monospace font (purely cosmetic)
+        _cboListFont.Items.Add(new FontChoice("", true, Label: "Same as the app font (default)"));
+        foreach (var f in new[]
+                 {
+                     "Segoe UI", "Segoe UI Variable Text", "Aptos", "Calibri", "Arial", "Verdana", "Tahoma", "Trebuchet MS",
+                     "Bahnschrift", "Inter", "Open Sans", "Roboto", "Noto Sans", "Source Sans Pro",
+                     "Cascadia Mono", "Cascadia Code", "Consolas", "Lucida Console", "Courier New", "JetBrains Mono",
+                     "Fira Code", "Fira Mono", "Source Code Pro", "Hack", "IBM Plex Mono", "Iosevka", "Ubuntu Mono",
+                 })
+            if (installed.Contains(f)) _cboListFont.Items.Add(new FontChoice(f, false));
+        foreach (var f in FontLoader.Families)
+            if (!_cboListFont.Items.Cast<FontChoice>().Any(x => x.Family.Equals(f, StringComparison.OrdinalIgnoreCase)))
+                _cboListFont.Items.Add(new FontChoice(f, false, FromFolder: true));
+        _cboListFont.SelectedIndexChanged += (_, _) =>
+        {
+            if (_loadingAppearance || _cboListFont.SelectedItem is not FontChoice f) return;
+            _settings.ListFont = f.IsDefault ? "" : f.Family;
+            _appearanceChanged();
+        };
         for (int pt = 9; pt <= 14; pt++) _cboListSize.Items.Add(pt);
         for (int pt = 10; pt <= 22; pt++) _cboTermSize.Items.Add(pt);
 
@@ -862,6 +901,7 @@ internal sealed class SettingsForm : Form
             _settings.DarkMode = false;
             _settings.AccentColor = "";
             _settings.UiFont = "";
+            _settings.ListFont = "";
             _settings.ListFontSize = 10;
             _settings.TerminalFont = "";
             _settings.TerminalFontSize = 14;
@@ -886,6 +926,7 @@ internal sealed class SettingsForm : Form
 
             Heading("Fonts"),
             FieldLabel("App font"), _cboUiFont,
+            FieldLabel("Server list font"), _cboListFont,
             FieldLabel("Server list text size"), _cboListSize,
             FieldLabel("Terminal font (SSH)"), _cboTermFont,
             FieldLabel("Terminal text size"), _cboTermSize,
@@ -917,9 +958,9 @@ internal sealed class SettingsForm : Form
     }
 
     /// <summary>A font in a font list: the family, shown as "Name (default)" for the default.</summary>
-    private sealed record FontChoice(string Family, bool IsDefault, bool FromFolder = false)
+    private sealed record FontChoice(string Family, bool IsDefault, bool FromFolder = false, string Label = null)
     {
-        public override string ToString() => IsDefault ? Family + " (default)" : FromFolder ? Family + "  (fonts folder)" : Family;
+        public override string ToString() => Label ?? (IsDefault ? Family + " (default)" : FromFolder ? Family + "  (fonts folder)" : Family);
     }
 
     private static void FillFonts(ComboBox combo, string defaultFamily, HashSet<string> installed, string[] candidates)
@@ -968,6 +1009,7 @@ internal sealed class SettingsForm : Form
 
             SelectFont(_cboUiFont, _settings.UiFont);
             SelectFont(_cboTermFont, _settings.TerminalFont);
+            SelectFont(_cboListFont, _settings.ListFont);
             _cboListSize.SelectedItem = (int)Math.Round(_settings.ListFontSize is >= 9f and <= 14f ? _settings.ListFontSize : 10);
             _cboTermSize.SelectedItem = _settings.TerminalFontSize is >= 10 and <= 22 ? _settings.TerminalFontSize : 14;
             var scheme = TerminalSchemes.Find(_settings.TerminalScheme);

@@ -600,6 +600,20 @@ internal sealed class TunnelException : Exception
 internal sealed class Tunnel : IDisposable
 {
     private const string DocumentName = "AWS-StartPortForwardingSession";
+    private const string RemoteHostDocumentName = "AWS-StartPortForwardingSessionToRemoteHost";
+
+    /// <summary>Nothing is listening on this local port.</summary>
+    private static bool PortIsFree(int port)
+    {
+        try
+        {
+            var l = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, port);
+            l.Start();
+            l.Stop();
+            return true;
+        }
+        catch { return false; }
+    }
 
     public int Port { get; private set; }
     public Process Proc { get; private set; }
@@ -614,12 +628,18 @@ internal sealed class Tunnel : IDisposable
     private Tunnel() { }
 
     /// <param name="remotePort">Port on the instance: 3389 for Remote Desktop, 22 for SSH.</param>
-    public static async Task<Tunnel> StartAsync(Instance inst, string profile, int remotePort = 3389)
+    /// <param name="remoteHost">Port forwarding: a host reached through the server (an RDS database, an internal site),
+    /// instead of the server itself.</param>
+    /// <param name="localPort">Port forwarding: a fixed local port (0 = any free one).</param>
+    public static async Task<Tunnel> StartAsync(Instance inst, string profile, int remotePort = 3389, string remoteHost = null, int localPort = 0)
     {
+        string document = string.IsNullOrWhiteSpace(remoteHost) ? DocumentName : RemoteHostDocumentName;
+        if (localPort > 0 && !PortIsFree(localPort))
+            throw new TunnelException($"Local port {localPort} is already in use on this PC: choose another, or leave it automatic.");
         string plugin = Tools.BundledPlugin ?? FindPlugin() ?? throw new TunnelException(
             "The AWS Session Manager plugin wasn't found: it's not in Switchboard's tools folder and isn't installed.");
 
-        var t = new Tunnel { Port = FreePort(), _profile = profile, _region = inst.Region };
+        var t = new Tunnel { Port = localPort > 0 ? localPort : FreePort(), _profile = profile, _region = inst.Region };
         Directory.CreateDirectory(Log.Dir);
         string logPath = Path.Combine(Log.Dir, $"tunnel-{inst.Id}-{t.Port}.log");
         t._log = new StreamWriter(new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
@@ -630,6 +650,7 @@ internal sealed class Tunnel : IDisposable
             ["portNumber"] = new() { remotePort.ToString() },
             ["localPortNumber"] = new() { t.Port.ToString() },
         };
+        if (!string.IsNullOrWhiteSpace(remoteHost)) parameters["host"] = new() { remoteHost.Trim() };
 
         Ssm.StartSessionResponse session;
         try
@@ -638,7 +659,7 @@ internal sealed class Tunnel : IDisposable
             session = await ssm.StartSessionAsync(new Ssm.StartSessionRequest
             {
                 Target = inst.Id,
-                DocumentName = DocumentName,
+                DocumentName = document,
                 Parameters = parameters,
             });
         }
@@ -660,7 +681,7 @@ internal sealed class Tunnel : IDisposable
         string requestJson = JsonSerializer.Serialize(new
         {
             Target = inst.Id,
-            DocumentName,
+            DocumentName = document,
             Parameters = parameters,
         });
 

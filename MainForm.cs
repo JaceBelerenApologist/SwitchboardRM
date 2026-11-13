@@ -183,6 +183,17 @@ internal sealed class MainForm : Form
     private FormWindowState _restoreState = FormWindowState.Normal;
     private readonly ToolStripMenuItem _miClone = new("New server &like this one ...");
     private readonly ToolStripMenuItem _miManage = new("&Manage server ...");
+    private readonly ToolStripMenuItem _miForward = new("Port &forwarding ...");
+    private readonly ToolStripMenuItem _miTerminate = new("&Terminate ...");
+    private readonly List<PortForward> _forwards = new();
+    private ForwardsForm _forwardsForm;
+
+    // restoring tabs (Settings > Terminal & SSH)
+    private const int ReconnectAtStart = 5;   // remote tabs reconnected at start-up; any more open as "Reconnect" placeholders
+    private readonly Dictionary<TabPage, TabState> _placeholders = new();
+    private readonly List<TabState> _pendingRestore = new();   // AWS tabs waiting for sign-in and the server list
+    private DateTime _restoredFrom = DateTime.Now;
+    private bool _closeConfirmed, _tabsSaved;
 
     // "it's working" indicators
     private readonly ToolStripProgressBar _progress = new()
@@ -268,10 +279,12 @@ internal sealed class MainForm : Form
     {
         Theme.Configure(_settings);
         Theme.Apply(this, _settings.EffectiveDark, _listMenu, _tabMenu);
-        // server list text size (Settings > Appearance), in the app font
+        // server list font and size (Settings > Appearance): its own font, or the app font. Set after the theme, which
+        // would otherwise give the list the app font again.
         float listSize = _settings.ListFontSize is >= 8f and <= 18f ? _settings.ListFontSize : 10;
-        if (_list.Font.Size != listSize || _list.Font.FontFamily.Name != Theme.UiFont)
-            _list.Font = Theme.CreateFont(Theme.UiFont, listSize);
+        string listFamily = string.IsNullOrWhiteSpace(_settings.ListFont) ? Theme.UiFont : _settings.ListFont.Trim();
+        if (_list.Font.Size != listSize || !_list.Font.FontFamily.Name.Equals(listFamily, StringComparison.OrdinalIgnoreCase))
+            _list.Font = Theme.CreateFont(listFamily, listSize);
         _hint.ForeColor = Theme.Current.Muted;
         RenderActionIcons();
         foreach (var s in _sessions) s.Term?.ApplyTheme();
@@ -376,6 +389,7 @@ internal sealed class MainForm : Form
 
         var smManage = new ToolStripMenuItem("&Manage server ...", null,
             async (_, _) => { if (Selected() is { IsEc2: true, IsSaved: false } target) await ManageServerAsync(target); });
+        var smForwards = new ToolStripMenuItem("Port forwar&ds ...", null, (_, _) => ShowForwards());
         var server = new ToolStripMenuItem("&Server");
         server.DropDownItems.AddRange(new ToolStripItem[]
         {
@@ -385,7 +399,7 @@ internal sealed class MainForm : Form
             new ToolStripSeparator(),
             _smCopyId, _smCopyIp,
             new ToolStripSeparator(),
-            smManage,
+            smManage, smForwards,
             new ToolStripSeparator(),
             _smAdHoc, _smAdd, _smEdit, _smRemove,
             ImportMenu(),
@@ -430,7 +444,7 @@ internal sealed class MainForm : Form
         _list.Dock = DockStyle.Fill;
         _list.View = View.Details;
         _list.FullRowSelect = true;
-        _list.MultiSelect = false;
+        _list.MultiSelect = true;   // Start / Stop / Reboot act on every selected AWS server; everything else on the first
         _list.HideSelection = false;
         _list.GridLines = false; // row lines are drawn by ThemedListView
         _list.ShowItemToolTips = true;
@@ -463,9 +477,9 @@ internal sealed class MainForm : Form
 
         // the context menu, the toolbar and the Server menu all do the same things
         EventHandler connect = async (_, _) => { var i = Selected(); if (i != null) await ConnectAsync(i); };
-        EventHandler start = async (_, _) => { var i = Selected(); if (i != null) await InstanceActionAsync(i, InstanceActions.Action.Start); };
-        EventHandler stop = async (_, _) => { var i = Selected(); if (i != null) await InstanceActionAsync(i, InstanceActions.Action.Stop); };
-        EventHandler reboot = async (_, _) => { var i = Selected(); if (i != null) await InstanceActionAsync(i, InstanceActions.Action.Reboot); };
+        EventHandler start = async (_, _) => await RunActionAsync(InstanceActions.Action.Start);
+        EventHandler stop = async (_, _) => await RunActionAsync(InstanceActions.Action.Stop);
+        EventHandler reboot = async (_, _) => await RunActionAsync(InstanceActions.Action.Reboot);
         foreach (var item in new ToolStripItem[] { _miConnect, _btnConnect, _smConnect }) item.Click += connect;
         foreach (var item in new ToolStripItem[] { _miConnectSsh, _smConnectSsh })
             item.Click += async (_, _) => { var i = Selected(); if (i != null) await ConnectAsync(i, Protocol.Ssh); };
@@ -489,13 +503,17 @@ internal sealed class MainForm : Form
             new ToolStripMenuItem("Copy instance ID", null, (_, _) => CopyToClipboard(Selected()?.Id)),
             new ToolStripMenuItem("Copy IP address", null, (_, _) => CopyToClipboard(Selected()?.Ip)),
             new ToolStripSeparator(),
-            _miManage, _miClone,
+            _miManage, _miForward, _miClone,
             new ToolStripSeparator(),
             _miAdd, _miEdit, _miRemove,
+            new ToolStripSeparator(),
+            _miTerminate,
         });
         _miClone.Click += async (_, _) => { if (Selected() is { IsEc2: true, IsSaved: false } src) await OpenNewServerAsync(src); };
         _miConnectAs.Click += async (_, _) => { if (Selected() is { } target) await ConnectAsAsync(target); };
         _miManage.Click += async (_, _) => { if (Selected() is { IsEc2: true, IsSaved: false } target) await ManageServerAsync(target); };
+        _miForward.Click += async (_, _) => { if (Selected() is { IsSaved: false } target) await StartPortForwardAsync(target); };
+        _miTerminate.Click += async (_, _) => { if (Selected() is { IsEc2: true, IsSaved: false } target) await TerminateServerAsync(target); };
         _listMenu.Opening += (_, e) =>
         {
             if (_list.PointToClient(Cursor.Position).Y < HeaderHeight())
@@ -512,7 +530,8 @@ internal sealed class MainForm : Form
                 return;
             }
             foreach (ToolStripItem item in _listMenu.Items) item.Visible = true;
-            _miClone.Visible = _miManage.Visible = Selected() is { IsEc2: true, IsSaved: false };   // EC2 servers only
+            _miClone.Visible = _miManage.Visible = _miTerminate.Visible = Selected() is { IsEc2: true, IsSaved: false };   // EC2 servers only
+            _miForward.Visible = Selected() is { IsSaved: false, Managed: true };   // through Session Manager
         };
         _list.ContextMenuStrip = _listMenu;
         _list.CellColor = (item, column) =>
@@ -688,6 +707,13 @@ internal sealed class MainForm : Form
         _smAdHoc.Click += async (_, _) => await ConnectAdHocAsync();
         _tabs.CloseRequested += page =>
         {
+            if (_placeholders.Remove(page))
+            {
+                _tabs.TabPages.Remove(page);
+                page.Dispose();
+                UpdateMainTabsVisibility();
+                return;
+            }
             var s = _sessions.FirstOrDefault(x => x.Page == page);
             if (s != null) CloseSession(s);
         };
@@ -763,7 +789,7 @@ internal sealed class MainForm : Form
     {
         if (_closeReady) { base.OnFormClosing(e); return; }
         // the close button: to the tray, or (until the user has chosen) ask. Never for Exit, an update, sign-out or shutdown.
-        if (!_exitRequested && !_updating && e.CloseReason == CloseReason.UserClosing)
+        if (!_exitRequested && !_updating && !_closeConfirmed && e.CloseReason == CloseReason.UserClosing)
         {
             bool toTray = _settings.CloseToTray;
             if (!toTray && !_settings.CloseChoiceMade)
@@ -779,14 +805,49 @@ internal sealed class MainForm : Form
                 return;
             }
         }
-        int remote = _sessions.Count(x => x.Kind != Protocol.Local), shells = _sessions.Count(x => x.Kind == Protocol.Local && x.Web == null);
-        string open = remote > 0 && shells > 0 ? $"{remote} remote session(s) and {shells} shell(s) are open"
-                    : remote > 0 ? $"{remote} remote session(s) are open"
-                    : $"{shells} shell(s) are open";
-        if (remote + shells > 0 && !_updating && !Ask($"{open}. Close them and exit?"))
+        if (!_closeConfirmed)
         {
-            e.Cancel = true;
-            return;
+            int remote = _sessions.Count(x => x.Kind != Protocol.Local), shells = _sessions.Count(x => x.Kind == Protocol.Local && x.Web == null);
+            string open = remote > 0 && shells > 0 ? $"{remote} remote session(s) and {shells} shell(s) are open"
+                        : remote > 0 ? $"{remote} remote session(s) are open"
+                        : $"{shells} shell(s) are open";
+            if (remote + shells > 0 && !_updating && !Ask($"{open}. Close them and exit?" +
+                    (_settings.RestoreTabs ? " (They reopen next time.)" : "")))
+            {
+                e.Cancel = true;
+                return;
+            }
+            _closeConfirmed = true;
+        }
+
+        // remember the tabs for next time, before the sessions close; reading terminal output takes a moment, so then
+        // the close pauses, saves, and starts again (without asking anything twice)
+        if (!_tabsSaved)
+        {
+            _tabsSaved = true;
+            if (!_settings.RestoreTabs) SessionRestore.Forget();
+            else
+            {
+                var (tabs, terminals) = CaptureTabs();
+                if (_settings.RestoreScrollback && terminals.Count > 0)
+                {
+                    e.Cancel = true;
+                    _exitRequested = true;
+                    var output = new Dictionary<int, string>();
+                    var deadline = DateTime.UtcNow.AddSeconds(3);   // in all: never hold up closing (or a Windows shutdown) for long
+                    foreach (var (index, term) in terminals)
+                    {
+                        var left = deadline - DateTime.UtcNow;
+                        if (left <= TimeSpan.Zero) break;
+                        var read = term.ScrollbackAsync();
+                        if (await Task.WhenAny(read, Task.Delay(left)) == read) output[index] = read.Result;
+                    }
+                    SessionRestore.Save(tabs, output);
+                    Close();
+                    return;
+                }
+                SessionRestore.Save(tabs, null);
+            }
         }
         _settings.Profile = Profile;
         _settings.WindowsOnly = _chkWin.Checked;
@@ -859,6 +920,27 @@ internal sealed class MainForm : Form
 
     private Instance Selected() =>
         _list.SelectedItems.Count > 0 ? (Instance)_list.SelectedItems[0].Tag : null;
+
+    /// <summary>All selected rows (several can be selected for Start / Stop / Reboot).</summary>
+    private List<Instance> SelectedAll() => _list.SelectedItems.Cast<ListViewItem>().Select(x => (Instance)x.Tag).ToList();
+
+    /// <summary>Start / Stop / Reboot: one server as before, or every selected AWS server after one confirmation that lists them.</summary>
+    private async Task RunActionAsync(InstanceActions.Action action)
+    {
+        var targets = SelectedAll().Where(i => i.IsEc2).ToList();
+        if (targets.Count <= 1)
+        {
+            if ((targets.FirstOrDefault() ?? Selected()) is { } one) await InstanceActionAsync(one, action);
+            return;
+        }
+        string verb = action.ToString();
+        string names = string.Join("\n", targets.Take(15).Select(t => "    " + t.Name)) + (targets.Count > 15 ? $"\n    ... and {targets.Count - 15} more" : "");
+        string note = action == InstanceActions.Action.Start ? "" : "\n\nAnyone connected to them is disconnected.";
+        if (!Ask($"{verb} these {targets.Count} servers?\n\n{names}{note}")) return;
+        if (!await EnsureSignedInAsync($"{verb.ToLowerInvariant()} {targets.Count} servers")) { SetStatus("Not signed in to AWS."); return; }
+        Log.Write($"{verb} {targets.Count} servers: {string.Join(", ", targets.Select(t => t.Id))}");
+        await Task.WhenAll(targets.Select(t => InstanceActionAsync(t, action, confirm: false)));
+    }
 
     /// <summary>Passes the search box and the "Windows only" / "Hide offline" filters.</summary>
     private bool Matches(Instance i)
@@ -970,6 +1052,7 @@ internal sealed class MainForm : Form
         var regions = _settings.ScanRegions.ToList();
         var (items, errors) = await Task.Run(() => InventoryService.LoadAsync(profile, regions));
         _aws = items;
+        if (_pendingRestore.Count > 0 && _aws.Count > 0) BeginInvoke(new Action(async () => await RestorePendingAsync()));
         ComposeList();
         RebuildList();
         _ = ProbeSavedAsync();
@@ -1064,7 +1147,7 @@ internal sealed class MainForm : Form
     private static Protocol DefaultProtocol(Instance i) =>
         i.IsSaved ? i.Saved.Kind : i.Platform == "Windows" ? Protocol.Rdp : Protocol.Ssh;
 
-    private async Task ConnectAsync(Instance inst, Protocol? want = null, string asUser = null, string asPassword = "")
+    private async Task ConnectAsync(Instance inst, Protocol? want = null, string asUser = null, string asPassword = "", string replay = null)
     {
         var protocol = want ?? DefaultProtocol(inst);
         string openingKey = $"{inst.Id}|{protocol}|{asUser}";
@@ -1103,7 +1186,7 @@ internal sealed class MainForm : Form
             }
             if (protocol == Protocol.Ssh)
             {
-                await OpenSshAsync(inst, asUser);
+                await OpenSshAsync(inst, asUser, replay);
                 return;
             }
 
@@ -1681,9 +1764,251 @@ internal sealed class MainForm : Form
     {
         if (string.IsNullOrEmpty(Profile)) { SetStatus("Choose an AWS profile and sign in first."); return; }
         if (!await EnsureSignedInAsync($"managing {inst.Name}")) { SetStatus("Not signed in to AWS."); return; }
-        using var f = new ServerForm(Profile, inst.Region, inst.Id, inst.Name);
+        var peers = _aws.Where(x => x.Region == inst.Region && x.Online && x.Id != inst.Id)
+            .Select(x => new CommandTarget(x.Id, x.Name, x.Platform.Contains("Windows", StringComparison.OrdinalIgnoreCase)));
+        using var f = new ServerForm(Profile, inst.Region, inst.Id, inst.Name, _settings, peers);
         f.ShowDialog(this);
-        if (f.Changed) await RefreshAsync();
+        if (f.Terminated) AfterTermination(inst);
+        if (f.Changed || f.Terminated) await RefreshAsync();
+    }
+
+    // ---------------------------------------------------------------- restoring tabs
+
+    /// <summary>The open tabs, in order (main tabs, then docked), and the terminals among them (by index in Tabs).</summary>
+    private (SavedTabs Tabs, List<(int Index, TerminalHost Term)> Terminals) CaptureTabs()
+    {
+        var saved = new SavedTabs();
+        var terminals = new List<(int, TerminalHost)>();
+        foreach (var page in _tabs.TabPages.Cast<TabPage>().Concat(_dockTabs.TabPages.Cast<TabPage>()))
+        {
+            if (_placeholders.TryGetValue(page, out var waiting))
+            {
+                if (page == _tabs.SelectedTab) saved.Selected = saved.Tabs.Count;
+                saved.Tabs.Add(waiting);
+                continue;
+            }
+            var s = _sessions.FirstOrDefault(x => x.Page == page);
+            if (s == null) continue;
+            var tab = new TabState { Name = s.Inst.Name, AsUser = s.AsUser, Docked = s.Docked };
+            if (s.Web != null) tab.Kind = "claude-web";
+            else if (s.Kind == Protocol.Local)
+            {
+                if (s.Inst.Type == "claude-code-install") continue;   // the installer isn't something to reopen
+                tab.Kind = "shell";
+                tab.ShellId = s.Inst.Type;
+            }
+            else
+            {
+                tab.Kind = s.Kind == Protocol.Ssh ? "ssh" : "rdp";
+                if (s.Inst.IsSaved) tab.SavedId = s.Inst.Saved.Id;
+                else { tab.InstanceId = s.Inst.Id; tab.Region = s.Inst.Region; }
+            }
+            if (page == _tabs.SelectedTab) saved.Selected = saved.Tabs.Count;
+            if (s.Term != null) terminals.Add((saved.Tabs.Count, s.Term));
+            saved.Tabs.Add(tab);
+        }
+        return (saved, terminals);
+    }
+
+    /// <summary>
+    /// Start-up: reopen last time's tabs. Shells and Claude tabs reopen; remote tabs reconnect, the first few at once
+    /// and the rest as Reconnect placeholders; AWS tabs wait until signed in with the server list loaded.
+    /// </summary>
+    public async Task RestoreTabsAsync()
+    {
+        if (!_settings.RestoreTabs) return;
+        var saved = SessionRestore.Load();
+        if (saved == null || saved.Tabs.Count == 0) return;
+        _restoredFrom = saved.SavedAt;
+        Log.Write($"Restoring {saved.Tabs.Count} tab(s) from {saved.SavedAt:yyyy-MM-dd HH:mm}");
+        var selected = saved.Selected >= 0 && saved.Selected < saved.Tabs.Count ? saved.Tabs[saved.Selected] : null;
+        TabPage selectPage = null;
+        int reconnects = ReconnectAtStart;
+
+        foreach (var tab in saved.Tabs)
+        {
+            try
+            {
+                TabPage page;
+                if (tab.IsAws && _aws.Count == 0) { _pendingRestore.Add(tab); continue; }
+                if (tab.IsRemote)
+                {
+                    if (reconnects > 0) { reconnects--; page = await RestoreRemoteAsync(tab); }
+                    else page = AddPlaceholder(tab);
+                }
+                else page = await RestoreLocalAsync(tab);
+                if (tab == selected && page != null) selectPage = page;
+            }
+            catch (Exception ex) { Log.Write($"Couldn't reopen {tab.Name}: {ex.Message}"); }
+        }
+        if (_placeholders.Count > 0) ApplyTheme();   // the placeholders' buttons
+        if (selectPage != null && _tabs.TabPages.Contains(selectPage)) _tabs.SelectedTab = selectPage;
+        if (_pendingRestore.Count > 0)
+            SetStatus($"{_pendingRestore.Count} AWS tab(s) from last time reopen once you're signed in.");
+    }
+
+    /// <summary>AWS tabs that waited for sign-in: the server list has loaded now.</summary>
+    private async Task RestorePendingAsync()
+    {
+        var waiting = _pendingRestore.ToList();
+        _pendingRestore.Clear();
+        int reconnects = ReconnectAtStart;
+        foreach (var tab in waiting)
+        {
+            try
+            {
+                if (reconnects > 0) { reconnects--; await RestoreRemoteAsync(tab); }
+                else AddPlaceholder(tab);
+            }
+            catch (Exception ex) { Log.Write($"Couldn't reopen {tab.Name}: {ex.Message}"); }
+        }
+        if (_placeholders.Count > 0) ApplyTheme();
+    }
+
+    private async Task<TabPage> RestoreLocalAsync(TabState tab)
+    {
+        if (tab.Kind == "claude-web")
+        {
+            await OpenClaudeWebAsync();
+            return _sessions.FirstOrDefault(x => x.Web != null)?.Page;
+        }
+        ShellInfo shell;
+        if (tab.ShellId == "claude-code")
+        {
+            // Claude Code: pick up its last conversation (claude --continue)
+            var cc = Shells.ClaudeCode();
+            shell = cc == null ? null : cc with { CommandLine = cc.CommandLine + " --continue" };
+        }
+        else shell = Shells.Find(tab.ShellId);
+        if (shell == null) { Log.Write($"Restore: {tab.Name} wasn't reopened ({tab.ShellId} isn't available now)"); return null; }
+        await OpenShellAsync(shell, tab.Docked, SessionRestore.ReadScrollback(tab));
+        return _sessions.LastOrDefault(x => x.Kind == Protocol.Local && x.Web == null)?.Page;
+    }
+
+    /// <summary>The server a remote tab was connected to: a saved connection, or an AWS server in the loaded list.</summary>
+    private Instance FindTarget(TabState tab)
+    {
+        if (tab.SavedId.Length > 0)
+            return _saved.FirstOrDefault(c => c.Id == tab.SavedId) is { } c ? ConnectionStore.ToInstance(c, null) : null;
+        return _aws.FirstOrDefault(i => i.Id == tab.InstanceId);
+    }
+
+    private async Task<TabPage> RestoreRemoteAsync(TabState tab)
+    {
+        var inst = FindTarget(tab);
+        if (inst == null)
+        {
+            Log.Write($"Restore: {tab.Name} wasn't reopened (the server or connection no longer exists)");
+            return null;
+        }
+        var protocol = tab.Kind == "ssh" ? Protocol.Ssh : Protocol.Rdp;
+        await ConnectAsync(inst, protocol, tab.AsUser, "", tab.Kind == "ssh" ? SessionRestore.ReadScrollback(tab) : null);
+        var s = _sessions.LastOrDefault(x => x.Inst.Id == inst.Id && x.Kind == protocol && x.AsUser == tab.AsUser);
+        if (s != null && tab.Docked && s.Term != null && !s.Docked) DockSession(s);
+        return s?.Page;
+    }
+
+    /// <summary>A remote tab that waits for a click: Reconnect opens it (as a new tab); × closes it.</summary>
+    private TabPage AddPlaceholder(TabState tab)
+    {
+        string title = tab.Name + (tab.Kind == "ssh" ? " · SSH" : "") + (tab.AsUser != null ? $" ({tab.AsUser})" : "");
+        var page = new TabPage(title) { BackColor = Theme.Current.Back };
+        var label = new Label
+        {
+            Text = $"{title} was open last time.", AutoSize = true, UseMnemonic = false, Anchor = AnchorStyles.None,
+            ForeColor = Theme.Current.Muted, Tag = "muted", Margin = new Padding(0, 0, 0, 12),
+        };
+        var button = new Button { Text = "Reconnect", Tag = "primary", AutoSize = true, MinimumSize = new Size(140, 34), Anchor = AnchorStyles.None };
+        button.Click += async (_, _) => await ActivatePlaceholderAsync(page);
+        var center = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
+        center.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        center.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        center.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        center.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        center.Controls.Add(label, 0, 1);
+        center.Controls.Add(button, 0, 2);
+        page.Controls.Add(center);
+        _placeholders[page] = tab;
+        _tabs.TabPages.Add(page);
+        _tabs.Visible = true;
+        _hint.Visible = false;
+        return page;
+    }
+
+    private async Task ActivatePlaceholderAsync(TabPage page)
+    {
+        if (!_placeholders.TryGetValue(page, out var tab)) return;
+        if (tab.IsAws && FindTarget(tab) == null)
+        {
+            SetStatus(_aws.Count == 0 ? $"Sign in to AWS to reconnect {tab.Name}." : $"{tab.Name} isn't in the server list any more.");
+            return;
+        }
+        _placeholders.Remove(page);
+        _tabs.TabPages.Remove(page);
+        page.Dispose();
+        var opened = await RestoreRemoteAsync(tab);
+        if (opened != null && _tabs.TabPages.Contains(opened)) _tabs.SelectedTab = opened;
+        UpdateMainTabsVisibility();
+    }
+
+    // ---------------------------------------------------------------- port forwarding and terminate
+
+    /// <summary>Port forwarding through a server's Session Manager: to a port on the server, or a host behind it.</summary>
+    private async Task StartPortForwardAsync(Instance inst)
+    {
+        using var f = new PortForwardForm(inst.Name);
+        if (f.ShowDialog(this) != DialogResult.OK) return;
+        if (!await EnsureSignedInAsync($"forwarding a port through {inst.Name}")) { SetStatus("Not signed in to AWS."); return; }
+        string target = (f.Host.Length > 0 ? f.Host : inst.Name) + ":" + f.RemotePort;
+        SetStatus($"Opening a forward to {target} through {inst.Name} ...");
+        try
+        {
+            var tunnel = await Tunnel.StartAsync(inst, Profile, f.RemotePort, f.Host, f.LocalPort);
+            var forward = new PortForward { Server = inst, Tunnel = tunnel, Host = f.Host, RemotePort = f.RemotePort };
+            _forwards.Add(forward);
+            Log.Write($"Port forward: {forward.LocalAddress} -> {target} through {inst.Id}");
+            SetStatus($"Forwarding {forward.LocalAddress} to {target} (the address is on the clipboard; Server > Port forwards lists it).");
+            try { Clipboard.SetText(forward.LocalAddress); } catch { }
+            ShowForwards();
+        }
+        catch (Exception ex)
+        {
+            SetStatus("");
+            MessageBox.Show(this, $"The forward to {target} didn't start: {(ex is TunnelException ? ex.Message : Aws.Describe(ex))}",
+                "Port forwarding", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private void ShowForwards()
+    {
+        if (_forwardsForm is { IsDisposed: false }) { _forwardsForm.Fill(); _forwardsForm.Activate(); return; }
+        _forwardsForm = new ForwardsForm(_forwards, StopForward);
+        _forwardsForm.Show(this);
+    }
+
+    private void StopForward(PortForward f)
+    {
+        try { f.Tunnel?.Dispose(); } catch { }
+        _forwards.Remove(f);
+        Log.Write($"Port forward stopped: {f.LocalAddress} -> {f.Target}");
+        SetStatus($"Stopped forwarding {f.LocalAddress}.");
+    }
+
+    /// <summary>Terminate (type-the-name confirmation); its open tabs and forwards are closed afterwards.</summary>
+    private async Task TerminateServerAsync(Instance inst)
+    {
+        if (!await EnsureSignedInAsync($"terminating {inst.Name}")) { SetStatus("Not signed in to AWS."); return; }
+        using var f = new TerminateForm(Profile, inst.Region, inst.Id, inst.Name);
+        if (f.ShowDialog(this) != DialogResult.OK || !f.Terminated) return;
+        AfterTermination(inst);
+        await RefreshAsync();
+    }
+
+    private void AfterTermination(Instance inst)
+    {
+        foreach (var s in _sessions.Where(x => x.Inst.Id == inst.Id).ToList()) CloseSession(s);
+        foreach (var fw in _forwards.Where(x => x.Server.Id == inst.Id).ToList()) StopForward(fw);
+        SetStatus($"{inst.Name} is being terminated.");
     }
 
     // ---------------------------------------------------------------- new server
@@ -1885,7 +2210,8 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>Open a local shell in a new tab, starting in the user folder.</summary>
-    private async Task OpenShellAsync(ShellInfo shell, bool docked = false)
+    /// <param name="replay">Restored output from the last session, shown dimmed above the new shell.</param>
+    private async Task OpenShellAsync(ShellInfo shell, bool docked = false, string replay = null)
     {
         docked |= _settings.DockNewTerminals;   // Settings > Terminal & SSH > Open new terminals docked
         // "PowerShell", then "PowerShell 2", "PowerShell 3" ... for more of the same kind
@@ -1943,6 +2269,7 @@ internal sealed class MainForm : Form
             MessageBox.Show(this, msg, "Could not open the terminal", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
+        if (!string.IsNullOrEmpty(replay)) term.Replay(replay, _restoredFrom);
         term.Run(ShellCommandLine(shell), home, ShellEnvironment());
         term.FocusTerminal();
         SetStatus($"Opened {name}" + (Profile.Length > 0 ? $" (AWS_PROFILE={Profile})" : ""));
@@ -1951,7 +2278,7 @@ internal sealed class MainForm : Form
     // ---------------------------------------------------------------- SSH
 
     /// <summary>Open an SSH terminal tab: tunnel to port 22 for AWS servers (direct for saved ones), then ssh.exe.</summary>
-    private async Task OpenSshAsync(Instance inst, string asUser = null)
+    private async Task OpenSshAsync(Instance inst, string asUser = null, string replay = null)
     {
         if (Tools.Ssh == null)
         {
@@ -1978,6 +2305,7 @@ internal sealed class MainForm : Form
         page.Controls.Add(term);
         var session = new Session { Inst = inst, Kind = Protocol.Ssh, Term = term, Page = page, Docked = _settings.DockNewTerminals, AsUser = asUser };
         _sessions.Add(session);
+        if (!string.IsNullOrEmpty(replay)) term.Replay(replay, _restoredFrom);
         if (session.Docked)
         {
             _dockTabs.TabPages.Add(page);
@@ -2382,6 +2710,8 @@ internal sealed class MainForm : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        foreach (var f in _forwards) { try { f.Tunnel?.Dispose(); } catch { } }
+        _forwards.Clear();
         SingleInstance.ActivateRequested -= OnActivateRequested;
         _tray.Visible = false;
         _tray.Dispose();

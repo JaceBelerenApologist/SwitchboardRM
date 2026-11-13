@@ -125,6 +125,33 @@ internal sealed class TerminalHost : UserControl
     /// <summary>Write a line to the terminal from the app (e.g. "Opening tunnel ..."), dimmed.</summary>
     public void Notice(string text) => Post($"\x1b[90m{text}\x1b[0m\r\n");
 
+    /// <summary>
+    /// Restored output from the last session: shown dimmed, then a divider, above whatever runs next (text sent before
+    /// the page is ready is queued and delivered first).
+    /// </summary>
+    public void Replay(string text, DateTime savedAt)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        string body = text.Replace("\r\n", "\n").Replace("\n", "\r\n");
+        Post($"\x1b[2m{body}\x1b[0m\r\n\x1b[90m—— restored from last session, {savedAt:yyyy-MM-dd HH:mm} ——\x1b[0m\r\n");
+    }
+
+    /// <summary>The terminal's scrollback as plain text (last 5,000 lines), or "" if it isn't available.</summary>
+    public async Task<string> ScrollbackAsync()
+    {
+        try
+        {
+            if (!_ready || _web.CoreWebView2 == null) return "";
+            string json = await _web.CoreWebView2.ExecuteScriptAsync("window.sbScrollback ? window.sbScrollback() : ''");
+            return JsonSerializer.Deserialize<string>(json) ?? "";
+        }
+        catch (Exception ex)
+        {
+            Log.Write("Couldn't read a terminal's scrollback: " + ex.Message);
+            return "";
+        }
+    }
+
     // ---------------------------------------------------------------- page <-> app
 
     private void OnMessage(object sender, CoreWebView2WebMessageReceivedEventArgs e)

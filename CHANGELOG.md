@@ -3,6 +3,64 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.13.0 (2026-11-26)
+
+Everything since 3.7.0:
+
+- Restore my tabs when Switchboard starts (Settings > Terminal & SSH, on by default): the tabs open when Switchboard
+  closed reopen next time, in order, docked where they were, with the same tab selected. Shells reopen; Claude Code
+  continues its last conversation; claude.ai reopens; Remote Desktop and SSH tabs reconnect (Connect as tabs with the
+  same user; typed passwords aren't kept). The first five remote tabs reconnect at start-up and any more open as
+  Reconnect placeholders, so a big set doesn't hit every server at once. AWS tabs follow once you're signed in and the
+  server list has loaded. Windows keeps a disconnected Remote Desktop session on the server, so reconnecting lands
+  back in it with its apps still open.
+- Also restore terminal output (off by default): terminals' scrollback (the last 5,000 lines) is kept on this PC until
+  the next close and shown dimmed above the new shell, under a "restored from last session" line. What was running
+  can't come back; shells keep their own command history (PowerShell's PSReadLine, bash's history file).
+- Server list font (Settings > Appearance > Fonts): the server list can have a font of its own, separate from the
+  app font: any of the text or monospace fonts offered, or one from the fonts folder. "Same as the app font" is the
+  default, as before.
+- Fixed: the Server window's page buttons ignored the app font. Their font was set after the theme from the window's
+  own base font (Segoe UI), undoing the theme for those buttons only.
+- Port forwarding (right-click an AWS server > Port forwarding): forward any port on the server (SQL Server,
+  HTTPS, WinRM ... presets, or any number), or on a host reached through it (an RDS database, an internal site), to
+  localhost on this PC, through Session Manager. A fixed local port, or any free one. The address is copied to the
+  clipboard. Server > Port forwards lists the active forwards with Copy address, Open in browser (web ports) and
+  Stop; forwards end when Switchboard closes.
+- Several servers can be selected in the list (Ctrl/Shift-click): Start, Stop and Reboot then apply to every selected
+  AWS server after one confirmation listing them. Everything else acts on the first selected server.
+- Terminate (right-click an AWS server, or the Server window's Protection page): says which disks are deleted with
+  the server and which are kept, refuses while termination protection is on, and only terminates once the server's
+  name is typed. Its open tabs and forwards are closed afterwards.
+- Server window, Run command page: run a PowerShell (Windows) or shell (Linux) script through Systems Manager on the
+  server, and optionally on other online servers in the same region with the same platform, all at once. Each
+  server's output is shown with its result; running on several servers asks first. The last ten commands are kept
+  for reuse.
+- Server window, Patches and agent page: the Systems Manager agent's status (online or connection lost, version and
+  whether it's the latest, OS, last check-in), patch compliance (missing, failed, waiting for a reboot, installed,
+  last operation, baseline) with the missing and failed patches listed (KB, title, classification, severity). Scan
+  for patches now, or install them now (no reboot by default; "reboot if needed" on request), using AWS's patch
+  baseline. Installed applications from Systems Manager inventory, with a filter.
+- Server window, Network page: per network interface, its security groups (from the VPC's) and source/destination
+  check; secondary private IPv4 addresses, added (a specific address, checked against the subnet and what's in use,
+  or the next free one) or removed. The server's instance profile (IAM role) can be attached, changed or removed, with
+  a warning when the role lacks Session Manager permissions: the way to fix a server Switchboard can't reach.
+- Server window, Images and snapshots page: create an image (AMI) of the server, rebooting it first for a consistent
+  image (recommended) or not; the account's own images with their state; snapshot all the server's disks at once; the
+  server's snapshots; and attach a copy of a snapshot as a new disk to recover files, without touching the server's
+  own disks (on Windows it's brought online with a drive letter).
+- Server window, Instance type page: the current type with its price, and every type that runs on the server's
+  architecture with its price and the monthly difference. Change type stops the server (after asking), waits for it
+  to stop, changes the type and starts it again if it was running, showing each step. Stop protection is respected.
+- Server window, Disks page: the server's disks (device, size, type, IOPS, throughput, encryption).
+  - Grow a disk (optionally changing its type, e.g. gp2 to gp3) while the server runs, then extend its partition and
+    file system inside the OS through Systems Manager: Windows extends the disk's last partition (found by the volume
+    ID; a last partition without a drive letter is left alone), Linux grows the partition and the XFS or ext4 file
+    system.
+  - Add a disk (size, type, encryption) in the server's zone at the next free device name; on Windows it can be
+    initialized and formatted (GPT, NTFS, next free letter) straight away.
+  - Detach a disk (not the system disk); the disk is kept and can be attached again.
+
 ## 3.7.0 (2026-11-20)
 
 - Server window (right-click an AWS server > Manage server, or Server > Manage server), with its pages on the left:
