@@ -3,6 +3,19 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.7.0 (2026-11-20)
+
+- Server window (right-click an AWS server > Manage server, or Server > Manage server), with its pages on the left:
+  - Overview: instance type, state, zone, platform, image, launch time, IP addresses, instance profile, key pair,
+    security groups, disks (size, type, IOPS, encryption), AWS status checks (system and instance) and scheduled
+    events (maintenance, retirement), protections and monitoring.
+  - Screen and log: a console screenshot and the system log, which work even when Remote Desktop and Session Manager
+    can't reach the server.
+  - Name and tags: rename the server and edit its tags (AWS's own aws: tags are left alone).
+  - Protection: termination and stop protection, what an OS shutdown does (switching to "terminate" asks first), and
+    detailed monitoring.
+  More pages follow in later versions.
+
 ## 3.6.0 (2026-11-19)
 
 - Allow only one copy of Switchboard (Settings > Appearance > Window, on by default): starting Switchboard again

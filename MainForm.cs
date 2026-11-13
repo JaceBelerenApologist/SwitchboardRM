@@ -182,6 +182,7 @@ internal sealed class MainForm : Form
     private bool _exitRequested;   // Exit from the tray or File menu: really close, even with "close to tray" on
     private FormWindowState _restoreState = FormWindowState.Normal;
     private readonly ToolStripMenuItem _miClone = new("New server &like this one ...");
+    private readonly ToolStripMenuItem _miManage = new("&Manage server ...");
 
     // "it's working" indicators
     private readonly ToolStripProgressBar _progress = new()
@@ -373,6 +374,8 @@ internal sealed class MainForm : Form
         aws.DropDownItems.Add(new ToolStripMenuItem("&Profile settings...", null, async (_, _) => await OpenSettingsAsync(SettingsForm.Page.Profile)));
         aws.DropDownItems.Add(new ToolStripMenuItem("&RDP credentials...", null, async (_, _) => await OpenSettingsAsync(SettingsForm.Page.Credentials)));
 
+        var smManage = new ToolStripMenuItem("&Manage server ...", null,
+            async (_, _) => { if (Selected() is { IsEc2: true, IsSaved: false } target) await ManageServerAsync(target); });
         var server = new ToolStripMenuItem("&Server");
         server.DropDownItems.AddRange(new ToolStripItem[]
         {
@@ -382,10 +385,16 @@ internal sealed class MainForm : Form
             new ToolStripSeparator(),
             _smCopyId, _smCopyIp,
             new ToolStripSeparator(),
+            smManage,
+            new ToolStripSeparator(),
             _smAdHoc, _smAdd, _smEdit, _smRemove,
             ImportMenu(),
         });
-        server.DropDownOpening += (_, _) => UpdateActionStates();
+        server.DropDownOpening += (_, _) =>
+        {
+            UpdateActionStates();
+            smManage.Enabled = Selected() is { IsEc2: true, IsSaved: false };
+        };
 
         var help = new ToolStripMenuItem("&Help");
         help.DropDownItems.Add(new ToolStripMenuItem("Check for &updates ...", null, async (_, _) => await CheckForUpdatesAsync(manual: true)));
@@ -480,12 +489,13 @@ internal sealed class MainForm : Form
             new ToolStripMenuItem("Copy instance ID", null, (_, _) => CopyToClipboard(Selected()?.Id)),
             new ToolStripMenuItem("Copy IP address", null, (_, _) => CopyToClipboard(Selected()?.Ip)),
             new ToolStripSeparator(),
-            _miClone,
+            _miManage, _miClone,
             new ToolStripSeparator(),
             _miAdd, _miEdit, _miRemove,
         });
         _miClone.Click += async (_, _) => { if (Selected() is { IsEc2: true, IsSaved: false } src) await OpenNewServerAsync(src); };
         _miConnectAs.Click += async (_, _) => { if (Selected() is { } target) await ConnectAsAsync(target); };
+        _miManage.Click += async (_, _) => { if (Selected() is { IsEc2: true, IsSaved: false } target) await ManageServerAsync(target); };
         _listMenu.Opening += (_, e) =>
         {
             if (_list.PointToClient(Cursor.Position).Y < HeaderHeight())
@@ -502,7 +512,7 @@ internal sealed class MainForm : Form
                 return;
             }
             foreach (ToolStripItem item in _listMenu.Items) item.Visible = true;
-            _miClone.Visible = Selected() is { IsEc2: true, IsSaved: false };   // only an EC2 server can be copied
+            _miClone.Visible = _miManage.Visible = Selected() is { IsEc2: true, IsSaved: false };   // EC2 servers only
         };
         _list.ContextMenuStrip = _listMenu;
         _list.CellColor = (item, column) =>
@@ -1662,6 +1672,18 @@ internal sealed class MainForm : Form
         Close();
         // if the question was answered "no", the next close button press follows the tray option again
         if (!IsDisposed) BeginInvoke(() => _exitRequested = false);
+    }
+
+    // ---------------------------------------------------------------- server window
+
+    /// <summary>The Server window for an EC2 server (details, screenshot and log, tags, protection ...).</summary>
+    private async Task ManageServerAsync(Instance inst)
+    {
+        if (string.IsNullOrEmpty(Profile)) { SetStatus("Choose an AWS profile and sign in first."); return; }
+        if (!await EnsureSignedInAsync($"managing {inst.Name}")) { SetStatus("Not signed in to AWS."); return; }
+        using var f = new ServerForm(Profile, inst.Region, inst.Id, inst.Name);
+        f.ShowDialog(this);
+        if (f.Changed) await RefreshAsync();
     }
 
     // ---------------------------------------------------------------- new server

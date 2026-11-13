@@ -130,6 +130,7 @@ Runs on `windows-latest`.
 | `Theme.cs` | Palettes, accent math (WCAG), fonts, custom controls: `ThemedCheckBox`, `ThemedListView`, `ThemedTabControl` (+ button, shell icons, close ×), `AccentSwatch`, renderers, title bar |
 | `SettingsForm.cs` | Settings pages: AWS profile, RDP credentials, Terminal & SSH, Appearance, About |
 | `Models.cs` | `AppSettings` (settings.json), `Instance`, OS names, `Log` (rotation) |
+| `ServerAdmin.cs`, `ServerForm.cs` | The Server window (Manage server, EC2 only): pages on the left, each built on first view and themed as shown. 3.7.0: Overview (details, disks, status checks, scheduled events), Screen and log (`GetConsoleScreenshot` with WakeUp, `GetConsoleOutput` Latest with fallback), Name and tags (`CreateTags`/`DeleteTags` diff, aws: tags untouched), Protection (`ModifyInstanceAttribute` one attribute per call, `Monitor`/`UnmonitorInstances`). Planned pages: instance type, disks (+ in-OS extend), network, images/snapshots, Run Command, patch/inventory, port forwarding, bulk actions, terminate |
 | `SingleInstance.cs` | One copy per Windows session (setting `SingleInstance`, default on): named mutex `Local\SwitchboardRM.Running` claimed in `Program.Main`; a second start signals `Local\SwitchboardRM.Activate` (after `AllowSetForegroundWindow`) and exits; MainForm brings itself forward (from the tray too). `--updated` (installer relaunch after an update) waits up to 20 s for the old copy to exit. The crash marker is unaffected: `RunMarker` already ignores a marker whose process is still a running Switchboard |
 | `ConnectAsForm.cs` | Connect as dialog; the session carries `AsUser` / `AsPassword` (memory only), used by `StartRdpAsync` and `SshCommand`, kept on reconnect; Connect as always opens its own tab |
 | `Connections.cs`, `ConnectionImport.cs` | Saved connections (connections.json), connection dialog (also "connect now"), importers |
@@ -321,6 +322,8 @@ commands by `$LASTEXITCODE`, never by stderr (9.1). Parse-check with
 23. **The .NET AWS SDK flattens some API structures:** `RunInstancesRequest.Monitoring` is a plain `bool` (there's no
     `RunInstancesMonitoringEnabled` class). Check property types against the SDK, not the API reference. SDK v4 also
     returns `null` for empty lists and many numbers/bools: read through null-safe helpers (`L`, `N`, `B` in `ServerLaunch`).
+23b. **A .NET class can't have a property with its own name, so the SDK renames such fields:** EC2's
+    `InstanceStatus.InstanceStatus` is `InstanceStatus.Status` in .NET.
 24. **C# forbids reusing a local name in a nested scope, even if the outer one is declared later in the method**
     (CS0136): give disk/type/etc. variables distinct names (`wantDisk`, `wantImage`).
 25. **`X509Certificate.CreateFromSignedFile` is marked obsolete (SYSLIB0057)** but is still the only built-in way to
