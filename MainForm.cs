@@ -195,6 +195,10 @@ internal sealed class MainForm : Form
     private DateTime _restoredFrom = DateTime.Now;
     private bool _closeConfirmed, _tabsSaved;
 
+    // the layout (window, columns, list width, dock height) is saved a moment after it changes, not only on exit:
+    // a Windows shutdown or anything else that ends Switchboard abruptly would otherwise lose it
+    private readonly System.Windows.Forms.Timer _layoutSave = new() { Interval = 1000 };
+
     // "it's working" indicators
     private readonly ToolStripProgressBar _progress = new()
     { Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 30, Width = 130, Visible = false };
@@ -239,6 +243,7 @@ internal sealed class MainForm : Form
         Text = AppInfo.Name;
         ClientSize = new Size(1400, 820);
         StartPosition = FormStartPosition.CenterScreen;
+        ApplySavedWindowBounds();
         Font = new Font("Segoe UI", 9F);
 
         if (AppIcon.Icon != null) Icon = AppIcon.Icon;
@@ -648,7 +653,9 @@ internal sealed class MainForm : Form
         };
         _list.ColumnWidthChanged += (_, e) =>
         {
-            if (!_rebuildingColumns && e.ColumnIndex < _columns.Count - 1) CaptureColumnWidths(); // last one stretches to fit
+            if (_rebuildingColumns || e.ColumnIndex >= _columns.Count - 1) return;   // the last one stretches to fit
+            CaptureColumnWidths();
+            LayoutChanged();
         };
         _list.ColumnClick += (_, e) =>
         {
@@ -684,7 +691,16 @@ internal sealed class MainForm : Form
         {
             if (!_dockSplit.Panel2Collapsed && !_dockMinimized)
                 _settings.DockHeight = _dockSplit.Height - _dockSplit.SplitterDistance - _dockSplit.SplitterWidth;
+            LayoutChanged();
         };
+        _split.SplitterMoved += (_, _) =>
+        {
+            if (!_split.Panel1Collapsed && Visible) _settings.ListWidth = _split.SplitterDistance;
+            LayoutChanged();
+        };
+        ResizeEnd += (_, _) => LayoutChanged();       // after dragging the window's edge or moving it
+        SizeChanged += (_, _) => { if (Visible && WindowState != FormWindowState.Minimized) LayoutChanged(); };   // maximize / restore
+        _layoutSave.Tick += (_, _) => SaveLayoutNow();
         _dockSplit.MouseDoubleClick += (_, _) =>   // double-click the bar: back to a third of the height
         {
             if (_dockMinimized) { SetDockMinimized(false); return; }
@@ -788,6 +804,15 @@ internal sealed class MainForm : Form
     protected override async void OnFormClosing(FormClosingEventArgs e)
     {
         if (_closeReady) { base.OnFormClosing(e); return; }
+        bool shuttingDown = e.CloseReason is CloseReason.WindowsShutDown or CloseReason.TaskManagerClosing;
+        if (shuttingDown && !_closeConfirmed)
+        {
+            // Windows is signing out or shutting down: asking "close them and exit?" would only hold things up until
+            // Windows ends the app, losing the layout and tabs. Save them and close.
+            _closeConfirmed = true;
+            Log.Write($"Closing for {e.CloseReason}: saving the layout and tabs without asking");
+        }
+        SaveLayoutNow();
         // the close button: to the tray, or (until the user has chosen) ask. Never for Exit, an update, sign-out or shutdown.
         if (!_exitRequested && !_updating && !_closeConfirmed && e.CloseReason == CloseReason.UserClosing)
         {
@@ -829,7 +854,7 @@ internal sealed class MainForm : Form
             else
             {
                 var (tabs, terminals) = CaptureTabs();
-                if (_settings.RestoreScrollback && terminals.Count > 0)
+                if (_settings.RestoreScrollback && terminals.Count > 0 && !shuttingDown)
                 {
                     e.Cancel = true;
                     _exitRequested = true;
@@ -1770,6 +1795,59 @@ internal sealed class MainForm : Form
         f.ShowDialog(this);
         if (f.Terminated) AfterTermination(inst);
         if (f.Changed || f.Terminated) await RefreshAsync();
+    }
+
+    // ---------------------------------------------------------------- remembering the layout
+
+    /// <summary>The window where it was last time (if that's still on a screen), and maximized if it was.</summary>
+    private void ApplySavedWindowBounds()
+    {
+        if (_settings.WindowBounds is { Length: 4 } b && b[2] >= 600 && b[3] >= 400)
+        {
+            var bounds = new Rectangle(b[0], b[1], b[2], b[3]);
+            // at least a decent part of it on a screen that's connected now (a monitor may have gone)
+            bool onScreen = Screen.AllScreens.Any(sc =>
+            {
+                var overlap = Rectangle.Intersect(sc.WorkingArea, bounds);
+                return overlap.Width >= 200 && overlap.Height >= 150;
+            });
+            if (onScreen)
+            {
+                StartPosition = FormStartPosition.Manual;
+                Bounds = bounds;
+            }
+        }
+        if (_settings.WindowMaximized) WindowState = FormWindowState.Maximized;
+    }
+
+    /// <summary>Something in the layout changed: save it a moment later (once changes settle).</summary>
+    private void LayoutChanged()
+    {
+        if (!IsHandleCreated || _closeReady) return;
+        _layoutSave.Stop();
+        _layoutSave.Start();
+    }
+
+    /// <summary>Save the window's position, size and state, the columns, the list width and the dock height.</summary>
+    private void SaveLayoutNow()
+    {
+        _layoutSave.Stop();
+        try
+        {
+            if (Visible)
+            {
+                // the normal (not maximized) bounds, so restoring from maximized goes back to the right size
+                var normal = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+                if (normal.Width >= 600 && normal.Height >= 400)
+                    _settings.WindowBounds = new[] { normal.Left, normal.Top, normal.Width, normal.Height };
+                _settings.WindowMaximized = WindowState == FormWindowState.Maximized ||
+                                            (WindowState == FormWindowState.Minimized && _restoreState == FormWindowState.Maximized);
+            }
+            if (!_split.Panel1Collapsed && Visible) _settings.ListWidth = _split.SplitterDistance;
+            CaptureColumnWidths();
+            _settings.Save();
+        }
+        catch (Exception ex) { Log.Write("Couldn't save the layout: " + ex.Message); }
     }
 
     // ---------------------------------------------------------------- restoring tabs

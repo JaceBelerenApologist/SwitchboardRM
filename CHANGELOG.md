@@ -3,6 +3,15 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.13.1 (2026-11-27)
+
+- The layout is remembered: the window's position, size and maximized state (on whichever screen it was, or the
+  default if that screen is gone), along with the columns, the list width and the docked panel's height. It's saved a
+  moment after each change instead of only on exit.
+- Fixed: column widths and other layout changes could be lost. They were only written when Switchboard closed
+  normally, and a Windows shutdown or restart with sessions open stopped at the "close them and exit?" question until
+  Windows ended the app. Now a Windows shutdown or sign-out saves the layout and tabs and closes without asking.
+
 ## 3.13.0 (2026-11-26)
 
 Everything since 3.7.0:

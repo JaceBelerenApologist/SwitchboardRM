@@ -137,6 +137,9 @@ internal sealed class AppSettings
         _ => DarkMode,
     };
     public int ListWidth { get; set; } = 760;
+    /// <summary>The main window's normal (not maximized) position and size: left, top, width, height. Empty = default.</summary>
+    public int[] WindowBounds { get; set; } = Array.Empty<int>();
+    public bool WindowMaximized { get; set; }
     /// <summary>Height of the docked-terminal panel under the tabs, in pixels.</summary>
     public int DockHeight { get; set; } = 260;
     /// <summary>Open new shells and SSH sessions in the docked panel instead of a tab.</summary>
