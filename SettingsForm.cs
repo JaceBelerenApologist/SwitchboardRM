@@ -891,6 +891,8 @@ internal sealed class SettingsForm : Form
             FieldLabel("Terminal text size"), _cboTermSize,
 
             Heading("Window"),
+            TrayCheckBox("Allow only one copy of Switchboard (starting it again brings this window to the front)",
+                () => _settings.SingleInstance, v => _settings.SingleInstance = v),
             TrayCheckBox("Minimize to the system tray", () => _settings.MinimizeToTray, v => _settings.MinimizeToTray = v),
             TrayCheckBox("Close to the system tray (the close button keeps Switchboard running)", () => _settings.CloseToTray,
                 v => { _settings.CloseToTray = v; _settings.CloseChoiceMade = true; }),   // chosen here: the close button doesn't ask

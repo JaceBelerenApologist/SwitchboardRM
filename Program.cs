@@ -19,6 +19,15 @@ internal static class Program
                 "Unexpected error", MessageBoxButtons.OK, MessageBoxIcon.Error);
         };
 
+        // one copy only (Settings > Appearance > Window, on by default): a second start brings the open window forward
+        bool afterUpdate = Environment.GetCommandLineArgs().Skip(1).Any(a => a.Equals("--updated", StringComparison.OrdinalIgnoreCase));
+        if (!SingleInstance.Claim(afterUpdate) && AppSettings.Load().SingleInstance)
+        {
+            SingleInstance.ActivateRunningCopy();
+            return;
+        }
+        SingleInstance.Listen();
+
         Migration.Run(); // 1.x (AWS RDP Launcher) -> 2.0 settings and passwords, once
         FontLoader.LoadAll(); // fonts\ next to the .exe, for this app only
 

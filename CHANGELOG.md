@@ -3,6 +3,12 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.6.0 (2026-11-19)
+
+- Allow only one copy of Switchboard (Settings > Appearance > Window, on by default): starting Switchboard again
+  brings the open window to the front (from the tray or minimized too) instead of opening a second copy. One copy per
+  Windows session, so each user on a shared server has their own. Untick it to run several copies.
+
 ## 3.5.0 (2026-11-19)
 
 - Connect as (right-click a server): connect with another user, in a tab of its own (titled with the user), even when

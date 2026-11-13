@@ -130,6 +130,7 @@ Runs on `windows-latest`.
 | `Theme.cs` | Palettes, accent math (WCAG), fonts, custom controls: `ThemedCheckBox`, `ThemedListView`, `ThemedTabControl` (+ button, shell icons, close ×), `AccentSwatch`, renderers, title bar |
 | `SettingsForm.cs` | Settings pages: AWS profile, RDP credentials, Terminal & SSH, Appearance, About |
 | `Models.cs` | `AppSettings` (settings.json), `Instance`, OS names, `Log` (rotation) |
+| `SingleInstance.cs` | One copy per Windows session (setting `SingleInstance`, default on): named mutex `Local\SwitchboardRM.Running` claimed in `Program.Main`; a second start signals `Local\SwitchboardRM.Activate` (after `AllowSetForegroundWindow`) and exits; MainForm brings itself forward (from the tray too). `--updated` (installer relaunch after an update) waits up to 20 s for the old copy to exit. The crash marker is unaffected: `RunMarker` already ignores a marker whose process is still a running Switchboard |
 | `ConnectAsForm.cs` | Connect as dialog; the session carries `AsUser` / `AsPassword` (memory only), used by `StartRdpAsync` and `SshCommand`, kept on reconnect; Connect as always opens its own tab |
 | `Connections.cs`, `ConnectionImport.cs` | Saved connections (connections.json), connection dialog (also "connect now"), importers |
 | `CredentialStore.cs` | Windows Credential Manager (`SwitchboardRM:<user>`) |

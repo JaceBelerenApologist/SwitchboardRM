@@ -554,6 +554,7 @@ internal sealed class MainForm : Form
         _split.Dock = DockStyle.Fill;
         BuildUpdateBanner();
         BuildTray();
+        SingleInstance.ActivateRequested += OnActivateRequested;
         Controls.Add(_updateBanner); // added before the toolbar, so it docks below it
         Controls.Add(_tool);
         Controls.Add(_menu);        // added after the toolbar so it docks above it
@@ -1639,6 +1640,20 @@ internal sealed class MainForm : Form
         return choice;
     }
 
+    /// <summary>Switchboard was started again while this copy runs (one copy only): come to the front, from the tray too.</summary>
+    private void OnActivateRequested()
+    {
+        if (IsDisposed || !IsHandleCreated) return;   // still starting up: its window comes up by itself
+        BeginInvoke(() =>
+        {
+            if (!Visible) RestoreFromTray();
+            else if (WindowState == FormWindowState.Minimized) WindowState = _restoreState;
+            Activate();
+            BringToFront();
+            Log.Write("Single copy: started again, brought this window to the front");
+        });
+    }
+
     /// <summary>Exit (tray menu or File): really close, with the usual questions about open sessions.</summary>
     private void ExitApp()
     {
@@ -2345,6 +2360,7 @@ internal sealed class MainForm : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        SingleInstance.ActivateRequested -= OnActivateRequested;
         _tray.Visible = false;
         _tray.Dispose();
         // SystemEvents are static: leaving these attached would keep the window alive and call into it after closing
