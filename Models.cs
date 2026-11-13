@@ -141,6 +141,8 @@ internal sealed class AppSettings
     public bool DockNewTerminals { get; set; }
     /// <summary>Check GitHub for a newer release (at most daily). An administrator can turn this off by policy.</summary>
     public bool CheckForUpdates { get; set; } = true;
+    /// <summary>Users recently typed in Connect as (newest first), offered in its user list.</summary>
+    public List<string> RecentConnectAs { get; set; } = new();
     /// <summary>Minimizing hides the window to the system tray instead of the taskbar.</summary>
     public bool MinimizeToTray { get; set; }
     /// <summary>The window's close button hides it to the system tray; Exit (tray menu or File) really closes.</summary>

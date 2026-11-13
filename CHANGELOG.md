@@ -3,6 +3,14 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.5.0 (2026-11-19)
+
+- Connect as (right-click a server): connect with another user, in a tab of its own (titled with the user), even when
+  you're already connected as yourself. Remote Desktop: DOMAIN\user or user@domain and an optional password; left
+  empty, the password saved for that user is used, or Remote Desktop asks. A typed password stays in memory for that
+  tab only, unless "Save the password" stores it in Windows Credential Manager. SSH: the login name (the password or
+  key is entered in the terminal). Reconnecting the tab keeps its user. Recently used users are offered in a list.
+
 ## 3.4.0 (2026-11-18)
 
 - System tray options (Settings > Appearance > Window), both off by default: Minimize to the system tray, and Close to

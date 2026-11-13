@@ -2,8 +2,9 @@
 
 This file is read at the start of every Claude Code session in this repository. It records how the maintainer works,
 how the project is built and released, how the code fits together, and the lessons that cost real time to learn.
-**This repository is public (MIT).** Never write organisation-specific data here or anywhere in the repo: no tenant
-IDs, app IDs, account names, role ARNs, AWS account numbers, hostnames or certificate details.
+**Treat this repository as public (MIT)** (it may be private at times, but is written to be publishable). Never
+write organisation-specific data here or anywhere in the repo: no tenant IDs, app IDs, account names, role ARNs, AWS
+account numbers, hostnames or certificate details.
 
 ---
 
@@ -113,7 +114,7 @@ Runs on `windows-latest`.
 | File | Responsibility |
 |---|---|
 | `Program.cs` | Entry: `Migration.Run()`, `FontLoader.LoadAll()`, `TERM=xterm-256color`, crash marker (`RunMarker`), `StartupContext` (splash → `MainForm.PrepareAsync`), crash clean-up (signs out leftover keys if the last run didn't exit cleanly) |
-| `MainForm.cs` (~2,900 lines) | Main window: toolbar, menus, server list, tabs, docked terminal panel, connect flow, sign-in/renewal heartbeat, shells, Claude tabs, tab keys, wake/unlock handling |
+| `MainForm.cs` (~3,300 lines) | Main window: toolbar, menus, server list, tabs, docked terminal panel, connect flow, sign-in/renewal heartbeat, shells, Claude tabs, tab keys, wake/unlock handling, update notice, New server entry points, system tray |
 | `AwsServices.cs` | `Aws` (config/credentials paths, `ConfigValue`, `SetConfigValues`, `SetCredentials`, `SignOutAsync`, profiles list/remove, identity), inventory (SSM + EC2 per region), Session Manager tunnel (SDK `StartSession` + `session-manager-plugin.exe`), instance actions |
 | `EntraSignIn.cs` | Built-in Microsoft sign-in: SAML request, WebView2 sign-in window, hand-off capture, roles, STS `AssumeRoleWithSAML`, writes keys |
 | `ProfileSetup.cs`, `ProfileForms.cs` | Add / Edit / Remove profiles in-app: Microsoft (Entra) form with *Check sign-in* (lists roles), SSO form |
@@ -129,6 +130,7 @@ Runs on `windows-latest`.
 | `Theme.cs` | Palettes, accent math (WCAG), fonts, custom controls: `ThemedCheckBox`, `ThemedListView`, `ThemedTabControl` (+ button, shell icons, close ×), `AccentSwatch`, renderers, title bar |
 | `SettingsForm.cs` | Settings pages: AWS profile, RDP credentials, Terminal & SSH, Appearance, About |
 | `Models.cs` | `AppSettings` (settings.json), `Instance`, OS names, `Log` (rotation) |
+| `ConnectAsForm.cs` | Connect as dialog; the session carries `AsUser` / `AsPassword` (memory only), used by `StartRdpAsync` and `SshCommand`, kept on reconnect; Connect as always opens its own tab |
 | `Connections.cs`, `ConnectionImport.cs` | Saved connections (connections.json), connection dialog (also "connect now"), importers |
 | `CredentialStore.cs` | Windows Credential Manager (`SwitchboardRM:<user>`) |
 | `Tools.cs` | Bundled tool locations (`tools\`), About-page tool list |
@@ -214,7 +216,21 @@ don't), Ctrl+` dock panel. Terminals keep Ctrl+W/Ctrl+T/Ctrl+C for the shell; ap
   `[Run]` entry with `Check: IsAppUpdate` restarts the app only for `/SBUPDATE=1`. Unsigned (development) copies refuse
   to self-update and offer the release page.
 
-### 7.8 Robustness features
+### 7.8 System tray (Settings > Appearance > Window)
+- Settings: `MinimizeToTray`, `CloseToTray` (both off by default), `CloseChoiceMade`, `TrayHintShown`.
+- `OnFormClosing`: only `CloseReason.UserClosing` that isn't Exit (`_exitRequested`) or an update (`_updating`) is
+  diverted. If `CloseToTray` is on, the window hides to the tray. If it's off and `CloseChoiceMade` is false, a
+  `TaskDialog` asks first (Keep running in the tray / Exit / Cancel, *Don't ask me again*, footnote pointing to
+  Settings). The tick sets `CloseToTray` + `CloseChoiceMade`; without it the answer is for that time only. Changing
+  the option in Settings also sets `CloseChoiceMade`. Shutdown, sign-out and updates always close normally.
+- `ExitApp()` (tray menu and File > Exit) sets `_exitRequested`, restores the window if hidden (so the "close open
+  sessions?" question has an owner) and closes; if that question is answered "no", `_exitRequested` is reset.
+- Minimize to tray: the `Resize` handler hides the window when minimized; `_restoreState` remembers Normal/Maximized
+  for `RestoreFromTray()`. The tray icon is visible while either option is on, or while the window is hidden; it's
+  disposed in `OnFormClosed` (otherwise it lingers until hovered). The "still running" balloon shows once
+  (`TrayHintShown`), and not at all if the first-close dialog just explained it.
+
+### 7.9 Robustness features
 Job object kills all helper processes when the app ends (even on crash); crash marker → next start removes leftover
 AWS keys (if sign-out-on-close is on); taskbar icon set as class icon + re-sent on unlock/wake/display change; full
 redraw after wake (now, +1 s, +3 s); `app.log` rotates at 10 MB to `app.1.log`; tunnel logs deleted after 7 days.
@@ -293,6 +309,25 @@ commands by `$LASTEXITCODE`, never by stderr (9.1). Parse-check with
     chain (which needs working keys), so signed-out profiles still appear.
 20. **Job object + ConPTY:** start the child `CREATE_SUSPENDED`, assign to the job, then `ResumeThread`, so
     grandchildren are in the job too.
+21. **`Theme.Apply(form, ...)` only themes controls that are in the form's control tree at that moment.** In a
+    wizard that swaps screens in and out, theme each screen as it's shown (`ShowPage` calls it); controls added later
+    (rows, editors) are themed when added. Forgetting this left the 3.3.0 wizard's controls white in dark mode.
+22. **WinForms projects implicitly import `System.Drawing` and `System.Windows.Forms`**, which clash with AWS SDK
+    names: `Image` (use `using Ec2Image = Amazon.EC2.Model.Image;`). AWS service namespaces also clash with each other
+    (`ResourceType` is in both `Amazon.EC2` and `Amazon.SimpleSystemsManagement`). In a file using several services,
+    import only one service namespace, alias the others' models (`using Ssm = Amazon.SimpleSystemsManagement.Model;`)
+    and write their clients and enum types in full (`Amazon.EC2.ResourceType.Instance`, `Amazon.Pricing.FilterType`).
+23. **The .NET AWS SDK flattens some API structures:** `RunInstancesRequest.Monitoring` is a plain `bool` (there's no
+    `RunInstancesMonitoringEnabled` class). Check property types against the SDK, not the API reference. SDK v4 also
+    returns `null` for empty lists and many numbers/bools: read through null-safe helpers (`L`, `N`, `B` in `ServerLaunch`).
+24. **C# forbids reusing a local name in a nested scope, even if the outer one is declared later in the method**
+    (CS0136): give disk/type/etc. variables distinct names (`wantDisk`, `wantImage`).
+25. **`X509Certificate.CreateFromSignedFile` is marked obsolete (SYSLIB0057)** but is still the only built-in way to
+    read a signed exe's signer; it's used deliberately in `Updater.cs` with the warning suppressed around it.
+26. **GitHub answers 404, not 401/403, for a private repository to unauthenticated API calls.** The updater's
+    `releases/latest` check therefore fails while the repo is private (see 14).
+27. **Before delivering a zip, check it matches the working copy** (unzip and `diff -rq`): a zip packaged before a
+    fix once shipped the bug that had already been fixed.
 
 ---
 
@@ -303,6 +338,7 @@ commands by `$LASTEXITCODE`, never by stderr (9.1). Parse-check with
 | Settings, saved connections, crash marker | `%APPDATA%\SwitchboardRM\` (`settings.json`, `connections.json`, `running.marker`) |
 | Logs | `%LOCALAPPDATA%\SwitchboardRM\logs\` (`app.log`, `app.1.log`, `tunnel-*.log`) |
 | WebView2 data | `%LOCALAPPDATA%\SwitchboardRM\WebView2` (terminals), `\SignIn` (Entra), `\ClaudeWeb` |
+| Price cache (New server) | `%LOCALAPPDATA%\SwitchboardRM\prices\` (kept 3 days) |
 | Saved passwords | Windows Credential Manager, `SwitchboardRM:<user>` |
 | AWS profiles / keys | `~/.aws/config`, `~/.aws/credentials` (or `AWS_CONFIG_FILE` / `AWS_SHARED_CREDENTIALS_FILE`) |
 | Profile removal backups | `*.switchboard-backup` next to the AWS files |
@@ -350,7 +386,14 @@ Endpoint *certificate allow indicator* would use the public `.cer` (extractable 
 
 ## 14. Open items / roadmap (discussed, not built unless noted)
 
-- **Built in 3.2.0:** the auto-updater and New server / New server like this one (see 7.7).
+- **Built:** the auto-updater (3.2.0), the New server wizard with prices, data disks and full network control (3.3.0),
+  system tray options (3.4.0). See 7.7 and 7.8.
+- **Updater vs. private repository (open decision):** the repository is currently **private**, so the updater's
+  anonymous GitHub check gets 404 and can't work. Options discussed: make the repo public (works as built); keep code
+  private and publish releases to a separate public repo (workflow pushes with a token secret; `AppInfo.Repo` points
+  there); an internal update location (S3 / web server / share, URL set by setting or policy); or disable the updater by
+  policy (`DisableUpdateCheck = 1`) and deploy updates with Intune (Win32 app with supersedence). Never embed a GitHub
+  token in the app.
 - **New server, later:** launching several identical servers at once (a count, with numbered names) was discussed and
   deferred.
 - **SSO sign-in via the AWS SDK** (removes the bundled AWS CLI): deferred until someone with SSO can test it.

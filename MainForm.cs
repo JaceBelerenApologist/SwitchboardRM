@@ -21,6 +21,9 @@ internal sealed class Session
     public bool SawActivity;
     public bool WasConnected;
     public bool Flagged;
+    /// <summary>Connect as: this tab's own user (and typed password, kept in memory only); null = the usual credentials.</summary>
+    public string AsUser;
+    public string AsPassword = "";
 }
 
 /// <summary>How startup went: ready to use, or the user needs to sign in first.</summary>
@@ -142,6 +145,7 @@ internal sealed class MainForm : Form
     private readonly ToolStripMenuItem _smConnectRdp = new("Connect with Remote &Desktop");
     private readonly ToolStripMenuItem _miConnectSsh = new("Connect with SSH");
     private readonly ToolStripMenuItem _miConnectRdp = new("Connect with Remote Desktop");
+    private readonly ToolStripMenuItem _miConnectAs = new("Connect &as ...");
     private readonly ToolStripMenuItem _smStart = new("&Start");
     private readonly ToolStripMenuItem _smStop = new("S&top ...");
     private readonly ToolStripMenuItem _smReboot = new("&Reboot ...");
@@ -469,7 +473,7 @@ internal sealed class MainForm : Form
         _list.SelectedIndexChanged += (_, _) => UpdateActionStates();
         _listMenu.Items.AddRange(new ToolStripItem[]
         {
-            _miConnect, _miConnectSsh, _miConnectRdp,
+            _miConnect, _miConnectSsh, _miConnectRdp, _miConnectAs,
             new ToolStripSeparator(),
             _miStart, _miStop, _miReboot,
             new ToolStripSeparator(),
@@ -481,6 +485,7 @@ internal sealed class MainForm : Form
             _miAdd, _miEdit, _miRemove,
         });
         _miClone.Click += async (_, _) => { if (Selected() is { IsEc2: true, IsSaved: false } src) await OpenNewServerAsync(src); };
+        _miConnectAs.Click += async (_, _) => { if (Selected() is { } target) await ConnectAsAsync(target); };
         _listMenu.Opening += (_, e) =>
         {
             if (_list.PointToClient(Cursor.Position).Y < HeaderHeight())
@@ -1048,11 +1053,12 @@ internal sealed class MainForm : Form
     private static Protocol DefaultProtocol(Instance i) =>
         i.IsSaved ? i.Saved.Kind : i.Platform == "Windows" ? Protocol.Rdp : Protocol.Ssh;
 
-    private async Task ConnectAsync(Instance inst, Protocol? want = null)
+    private async Task ConnectAsync(Instance inst, Protocol? want = null, string asUser = null, string asPassword = "")
     {
         var protocol = want ?? DefaultProtocol(inst);
-        string openingKey = $"{inst.Id}|{protocol}";
-        var existing = _sessions.FirstOrDefault(s => s.Inst.Id == inst.Id && s.Kind == protocol);
+        string openingKey = $"{inst.Id}|{protocol}|{asUser}";
+        // Connect as always opens its own tab (it's usually alongside a session as yourself)
+        var existing = asUser != null ? null : _sessions.FirstOrDefault(s => s.Inst.Id == inst.Id && s.Kind == protocol && s.AsUser == null);
         if (existing != null) { _tabs.SelectedTab = existing.Page; return; }
         if (!_opening.Add(openingKey)) return;
 
@@ -1086,7 +1092,7 @@ internal sealed class MainForm : Form
             }
             if (protocol == Protocol.Ssh)
             {
-                await OpenSshAsync(inst);
+                await OpenSshAsync(inst, asUser);
                 return;
             }
 
@@ -1126,7 +1132,7 @@ internal sealed class MainForm : Form
                 }
             }
 
-            var page = new TabPage(inst.Name) { BackColor = Theme.Current.Back };
+            var page = new TabPage(asUser == null ? inst.Name : $"{inst.Name} ({asUser})") { BackColor = Theme.Current.Back };
             var host = new RdpHost(clsid) { Dock = DockStyle.Fill };
             host.Enter += (_, _) => _tabKeys?.Install();   // stay ahead of the RDP control's own keyboard hook
             host.FocusReleased += direction => SwitchTab(direction < 0 ? -1 : +1);   // Ctrl+Alt+Left / Right
@@ -1136,7 +1142,7 @@ internal sealed class MainForm : Form
             _hint.Visible = false;
             _tabs.SelectedTab = page;
 
-            var session = new Session { Inst = inst, Tunnel = tunnel, Rdp = host, Page = page };
+            var session = new Session { Inst = inst, Tunnel = tunnel, Rdp = host, Page = page, AsUser = asUser, AsPassword = asPassword ?? "" };
             _sessions.Add(session);
 
             try
@@ -1152,6 +1158,28 @@ internal sealed class MainForm : Form
             }
         }
         finally { _opening.Remove(openingKey); }
+    }
+
+    /// <summary>
+    /// Connect as: the server's usual protocol, with another user (and, for Remote Desktop, optionally a password),
+    /// in a tab of its own.
+    /// </summary>
+    private async Task ConnectAsAsync(Instance inst)
+    {
+        var protocol = DefaultProtocol(inst);
+        using var f = new ConnectAsForm(inst.Name, protocol == Protocol.Rdp, _settings.RecentConnectAs);
+        if (f.ShowDialog(this) != DialogResult.OK) return;
+
+        _settings.RecentConnectAs.RemoveAll(u => u.Equals(f.User, StringComparison.OrdinalIgnoreCase));
+        _settings.RecentConnectAs.Insert(0, f.User);
+        if (_settings.RecentConnectAs.Count > 10) _settings.RecentConnectAs.RemoveRange(10, _settings.RecentConnectAs.Count - 10);
+        _settings.Save();
+        if (f.SavePassword && f.Password.Length > 0)
+        {
+            try { CredentialStore.Save(f.User, f.Password); }
+            catch (Exception ex) { Log.Write("Could not save password: " + ex.Message); SetStatus("The password couldn't be saved: " + ex.Message); }
+        }
+        await ConnectAsync(inst, protocol, f.User, f.SavePassword ? "" : f.Password);
     }
 
     // ---------------------------------------------------------------- tab keys
@@ -1886,7 +1914,7 @@ internal sealed class MainForm : Form
     // ---------------------------------------------------------------- SSH
 
     /// <summary>Open an SSH terminal tab: tunnel to port 22 for AWS servers (direct for saved ones), then ssh.exe.</summary>
-    private async Task OpenSshAsync(Instance inst)
+    private async Task OpenSshAsync(Instance inst, string asUser = null)
     {
         if (Tools.Ssh == null)
         {
@@ -1901,7 +1929,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        var page = new TabPage(inst.Name + " · SSH") { BackColor = Theme.Current.Back };
+        var page = new TabPage(inst.Name + " · SSH" + (asUser == null ? "" : $" ({asUser})")) { BackColor = Theme.Current.Back };
         var term = new TerminalHost { Dock = DockStyle.Fill };
         term.AppShortcut += key => OnAppShortcut(key, _sessions.FirstOrDefault(x => x.Term == term));
         // Esc on an ended terminal closes its tab (after this key event, since closing destroys the terminal)
@@ -1911,7 +1939,7 @@ internal sealed class MainForm : Form
             if (ended != null) CloseSession(ended);
         });
         page.Controls.Add(term);
-        var session = new Session { Inst = inst, Kind = Protocol.Ssh, Term = term, Page = page, Docked = _settings.DockNewTerminals };
+        var session = new Session { Inst = inst, Kind = Protocol.Ssh, Term = term, Page = page, Docked = _settings.DockNewTerminals, AsUser = asUser };
         _sessions.Add(session);
         if (session.Docked)
         {
@@ -1961,7 +1989,7 @@ internal sealed class MainForm : Form
         if (reconnect)
         {
             term.Reset();
-            s.Page.Text = inst.Name + " · SSH";
+            s.Page.Text = inst.Name + " · SSH" + (s.AsUser == null ? "" : $" ({s.AsUser})");
         }
 
         if (!inst.IsSaved)
@@ -1995,7 +2023,7 @@ internal sealed class MainForm : Form
             if (term.IsDisposed) { s.Tunnel?.Dispose(); return; } // tab closed while the tunnel was opening
         }
 
-        string cmd = SshCommand(inst, s.Tunnel);
+        string cmd = SshCommand(inst, s.Tunnel, s.AsUser);
         Log.Write("SSH: " + cmd);
         term.Notice(cmd.Replace(Tools.Ssh, "ssh").Replace("\"ssh\"", "ssh"));
         term.Run(cmd);
@@ -2004,12 +2032,21 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>The ssh.exe command line for a server: through the tunnel on localhost, or straight to a saved host.</summary>
-    private string SshCommand(Instance inst, Tunnel tunnel)
+    /// <param name="asUser">Connect as: this tab's own login (null = the usual user).</param>
+    private string SshCommand(Instance inst, Tunnel tunnel, string asUser = null)
     {
         var args = new List<string>();
         string user, host;
         int port;
-        if (inst.IsSaved)
+        if (asUser != null)
+        {
+            // Connect as: this tab's own login, to the same server
+            user = asUser;
+            host = inst.IsSaved ? inst.Saved.Host : "127.0.0.1";
+            port = inst.IsSaved ? inst.Saved.Port : tunnel.Port;
+            if (!inst.IsSaved) { args.Add("-o"); args.Add("HostKeyAlias=" + inst.Id); }
+        }
+        else if (inst.IsSaved)
         {
             user = inst.Saved.User.Trim();
             host = inst.Saved.Host;
@@ -2054,6 +2091,12 @@ internal sealed class MainForm : Form
         string password = s.Inst.Saved != null && _adHocPasswords.TryGetValue(s.Inst.Saved.Id, out var oneOff)
             ? oneOff                                  // typed for a one-off connection, never stored
             : CredentialStore.Read(user) ?? "";
+        if (s.AsUser != null)
+        {
+            // Connect as: the user given for this tab; its typed password, else the one saved for that user, else RDP asks
+            user = s.AsUser;
+            password = s.AsPassword.Length > 0 ? s.AsPassword : CredentialStore.Read(user) ?? "";
+        }
         bool direct = s.Inst.IsSaved;
         string server = direct ? s.Inst.Saved.Host : "localhost";
         int port = direct ? s.Inst.Saved.Port : s.Tunnel.Port;
