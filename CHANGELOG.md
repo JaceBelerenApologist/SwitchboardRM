@@ -3,6 +3,12 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.14.0 (2026-11-28)
+
+- Tabs can be rearranged: drag a tab along the strip (main tabs and the docked panel), or right-click it > Move left /
+  Move right. Remote Desktop tabs stay connected while moving: tabs are reordered without taking their page out of
+  the window. The new order is what's restored next time.
+
 ## 3.13.1 (2026-11-27)
 
 - The layout is remembered: the window's position, size and maximized state (on whichever screen it was, or the

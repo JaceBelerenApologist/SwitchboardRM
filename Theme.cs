@@ -662,6 +662,13 @@ internal sealed class ThemedTabControl : TabControl
     public event Action<TabPage> CloseRequested;
     /// <summary>Raised when the + after the last tab is clicked (screen point to show a menu at).</summary>
     public event Action<Point> NewTabRequested;
+    /// <summary>Raised after tabs were dragged into a new order.</summary>
+    public event Action TabsReordered;
+
+    // dragging a tab along the strip to reorder
+    private int _dragIndex = -1;
+    private Point _dragStart;
+    private bool _dragging;
 
     /// <summary>Tag for tab pages that hold a local shell: they get a terminal icon before their name.</summary>
     public const string ShellTag = "shell";
@@ -736,9 +743,75 @@ internal sealed class ThemedTabControl : TabControl
         base.WndProc(ref m);
     }
 
+    private int TabAt(Point pt)
+    {
+        for (int i = 0; i < TabCount; i++)
+            if (GetTabRect(i).Contains(pt)) return i;
+        return -1;
+    }
+
+    /// <summary>
+    /// Move a tab to another position. Done by assigning pages to positions (TabPages[i] = page), which only relabels
+    /// the strip: no page is removed from the control, so nothing inside it is detached (a remote desktop would drop
+    /// its connection if its page were removed and inserted again).
+    /// </summary>
+    public void MoveTab(int from, int to)
+    {
+        if (from == to || from < 0 || to < 0 || from >= TabCount || to >= TabCount) return;
+        var page = TabPages[from];
+        int step = to > from ? 1 : -1;
+        for (int i = from; i != to; i += step)
+        {
+            var neighbour = TabPages[i + step];
+            TabPages[i + step] = page;
+            TabPages[i] = neighbour;
+        }
+        SelectedIndex = to;   // shows the moved page at its new position
+        Invalidate();
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e);
+        _dragIndex = e.Button == MouseButtons.Left ? TabAt(e.Location) : -1;
+        _dragStart = e.Location;
+        _dragging = false;
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+        if (_dragging)
+        {
+            _dragging = false;
+            Cursor = Cursors.Default;
+            TabsReordered?.Invoke();
+        }
+        _dragIndex = -1;
+    }
+
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
+        if (_dragIndex >= 0 && e.Button == MouseButtons.Left)
+        {
+            if (!_dragging && Math.Abs(e.X - _dragStart.X) >= SystemInformation.DragSize.Width)
+            {
+                _dragging = true;
+                Cursor = Cursors.SizeWE;
+            }
+            if (_dragging)
+            {
+                // only the horizontal position matters, so the tab follows even if the pointer drifts off the strip
+                int over = TabAt(new Point(e.X, GetTabRect(Math.Min(_dragIndex, TabCount - 1)).Top + 4));
+                if (over >= 0 && over != _dragIndex)
+                {
+                    MoveTab(_dragIndex, over);
+                    _dragIndex = over;
+                }
+                return;
+            }
+        }
         int h = CloseHit(e.Location);
         bool plus = PlusRect().Contains(e.Location);
         if (h != _hoverClose || plus != _hoverPlus) { _hoverClose = h; _hoverPlus = plus; Invalidate(); }

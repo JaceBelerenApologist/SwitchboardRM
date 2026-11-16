@@ -118,6 +118,8 @@ internal sealed class MainForm : Form
     private readonly ToolStripButton _btnCloseDocked = new(Icons.CloseX) { Alignment = ToolStripItemAlignment.Right, ToolTipText = "Close this terminal" };
     private readonly ToolStripMenuItem _miDock = new("Docked &terminals") { ShortcutKeyDisplayString = "Ctrl+`" };
     private readonly ToolStripMenuItem _tabMenuDock = new("Dock to bottom");
+    private readonly ToolStripMenuItem _tabMenuLeft = new("Move left");
+    private readonly ToolStripMenuItem _tabMenuRight = new("Move right");
     private readonly ToolStripLabel _dockTitle = new("Docked terminals");
     private bool _dockMinimized;   // collapsed to its header strip (the terminals keep running)
     private DateTime _dockToggledAt = DateTime.MinValue;   // so one click can't collapse and expand at once
@@ -571,6 +573,9 @@ internal sealed class MainForm : Form
         _dockTabs.BringToFront();   // fills what the header leaves
         _split.Panel2.Controls.Add(_dockSplit);
 
+        _tabMenu.Items.Add(_tabMenuLeft);
+        _tabMenu.Items.Add(_tabMenuRight);
+        _tabMenu.Items.Add(new ToolStripSeparator());
         _tabMenu.Items.Add(_tabMenuDock);
         _tabMenu.Items.Add("Close tab", null, (_, _) => { if (_menuTarget != null) CloseSession(_menuTarget); });
         _tabMenu.Opening += (_, e) =>
@@ -578,7 +583,13 @@ internal sealed class MainForm : Form
             // only terminals can dock (a remote desktop would lose its connection if moved)
             _tabMenuDock.Visible = _menuTarget?.Term != null;
             _tabMenuDock.Text = _menuTarget is { Docked: true } ? "Move back to a tab" : "Dock to bottom";
+            var (strip, index) = TabPosition(_menuTarget);
+            _tabMenuLeft.Enabled = index > 0;
+            _tabMenuRight.Enabled = strip != null && index >= 0 && index < strip.TabCount - 1;
         };
+        _tabMenuLeft.Click += (_, _) => MoveTabBy(_menuTarget, -1);
+        _tabMenuRight.Click += (_, _) => MoveTabBy(_menuTarget, +1);
+        _tabs.TabsReordered += () => Log.Write("Tabs reordered");
         _tabMenuDock.Click += (_, _) =>
         {
             if (_menuTarget == null) return;
@@ -1848,6 +1859,21 @@ internal sealed class MainForm : Form
             _settings.Save();
         }
         catch (Exception ex) { Log.Write("Couldn't save the layout: " + ex.Message); }
+    }
+
+    /// <summary>Which strip a session's tab is on (main or docked), and its position there.</summary>
+    private (ThemedTabControl Strip, int Index) TabPosition(Session s)
+    {
+        if (s?.Page == null) return (null, -1);
+        var strip = s.Docked ? _dockTabs : _tabs;
+        return (strip, strip.TabPages.IndexOf(s.Page));
+    }
+
+    private void MoveTabBy(Session s, int delta)
+    {
+        var (strip, index) = TabPosition(s);
+        if (strip == null || index < 0) return;
+        strip.MoveTab(index, Math.Clamp(index + delta, 0, strip.TabCount - 1));
     }
 
     // ---------------------------------------------------------------- restoring tabs

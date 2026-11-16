@@ -332,6 +332,10 @@ commands by `$LASTEXITCODE`, never by stderr (9.1). Parse-check with
     read a signed exe's signer; it's used deliberately in `Updater.cs` with the warning suppressed around it.
 26. **GitHub answers 404, not 401/403, for a private repository to unauthenticated API calls.** The updater's
     `releases/latest` check therefore fails while the repo is private (see 14).
+26a. **Reordering tabs must not remove and re-insert pages:** taking an RDP page out of its TabControl (even
+    briefly) drops the connection. `ThemedTabControl.MoveTab` reorders by assigning positions
+    (`TabPages[i] = page`, which only relabels the native tab items) in neighbour swaps, then sets `SelectedIndex`.
+    Dragging a tab (left button, past `SystemInformation.DragSize`) and the tab menu's Move left/right use it.
 26b. **Anything saved only in `OnFormClosing` is lost on a Windows shutdown or restart** if the close stops to ask a
     question: Windows ends the app first. Layout is saved shortly after each change (`LayoutChanged` → `SaveLayoutNow`,
     1 s timer), and `CloseReason.WindowsShutDown` / `TaskManagerClosing` skip the questions (and terminal output) and
