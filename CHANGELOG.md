@@ -3,6 +3,16 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.16.0 (2026-11-30)
+
+- Reconnect on a tab's right-click menu: for a session left stale, for example after Windows was locked long enough
+  for its tunnel to time out. Remote Desktop gets a fresh connection and tunnel with the same user (including a
+  Connect as user and a typed or one-off password, kept in memory) and stays in the same tab position; SSH reconnects
+  in place. Restored tabs waiting to reconnect also get a right-click menu (Reconnect, Close tab).
+- Shell tabs show their own program's icon instead of one shared terminal glyph: Command Prompt, Windows PowerShell,
+  PowerShell 7, Git Bash, WSL and Claude Code each look like themselves (read from the program, as Windows shows it).
+  The shell menus show the same icons. Shells without an icon of their own keep the terminal glyph.
+
 ## 3.15.0 (2026-11-29)
 
 - Remote tabs show where they connect, as a small badge before the name: AWS (in AWS orange) for servers reached

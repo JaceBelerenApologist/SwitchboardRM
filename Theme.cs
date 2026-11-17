@@ -675,6 +675,15 @@ internal sealed class ThemedTabControl : TabControl
     /// <summary>Put this in front of a shell tab's text, to make room for its icon.</summary>
     public const string IconSpace = "      ";
 
+    // a shell tab's own program icon (ShellIcons); kept with the page, so it follows it between the main and docked strips
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<TabPage, Image> TabIcons = new();
+
+    /// <summary>The icon a shell tab shows (its program's icon); without one, the generic terminal glyph.</summary>
+    public static void SetTabIcon(TabPage page, Image icon)
+    {
+        if (page != null && icon != null) TabIcons.AddOrUpdate(page, icon);
+    }
+
     /// <summary>
     /// Remote tabs: a small badge before the name (AWS for servers reached through Session Manager; RDP or SSH for
     /// saved connections). The page's Tag is BadgeTag(badge) and its text starts with BadgeRoom(badge).
@@ -894,8 +903,11 @@ internal sealed class ThemedTabControl : TabControl
             {
                 // terminal icon in the space IconSpace made, then the name
                 var iconRect = new Rectangle(textRect.Left, textRect.Top, 18, textRect.Height);
-                TextRenderer.DrawText(g, Icons.Terminal, Icons.Font, iconRect, sel ? p.AccentFore : p.Muted,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                if (TabIcons.TryGetValue(TabPages[i], out var icon))
+                    g.DrawImage(icon, new Rectangle(iconRect.Left + (iconRect.Width - 16) / 2, iconRect.Top + (iconRect.Height - 16) / 2 + 1, 16, 16));
+                else
+                    TextRenderer.DrawText(g, Icons.Terminal, Icons.Font, iconRect, sel ? p.AccentFore : p.Muted,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 text = text.TrimStart();
                 textRect = new Rectangle(textRect.Left + 22, textRect.Top, Math.Max(0, textRect.Width - 22), textRect.Height);
             }

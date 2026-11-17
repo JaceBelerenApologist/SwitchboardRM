@@ -118,6 +118,9 @@ internal sealed class MainForm : Form
     private readonly ToolStripButton _btnCloseDocked = new(Icons.CloseX) { Alignment = ToolStripItemAlignment.Right, ToolTipText = "Close this terminal" };
     private readonly ToolStripMenuItem _miDock = new("Docked &terminals") { ShortcutKeyDisplayString = "Ctrl+`" };
     private readonly ToolStripMenuItem _tabMenuDock = new("Dock to bottom");
+    private readonly ToolStripMenuItem _tabMenuReconnect = new("&Reconnect");
+    private readonly ContextMenuStrip _placeholderMenu = new();   // restored tabs waiting for a click
+    private TabPage _placeholderTarget;
     private readonly ToolStripMenuItem _tabMenuLeft = new("Move left");
     private readonly ToolStripMenuItem _tabMenuRight = new("Move right");
     private readonly ToolStripLabel _dockTitle = new("Docked terminals");
@@ -573,6 +576,8 @@ internal sealed class MainForm : Form
         _dockTabs.BringToFront();   // fills what the header leaves
         _split.Panel2.Controls.Add(_dockSplit);
 
+        _tabMenu.Items.Add(_tabMenuReconnect);
+        _tabMenu.Items.Add(new ToolStripSeparator());
         _tabMenu.Items.Add(_tabMenuLeft);
         _tabMenu.Items.Add(_tabMenuRight);
         _tabMenu.Items.Add(new ToolStripSeparator());
@@ -583,10 +588,21 @@ internal sealed class MainForm : Form
             // only terminals can dock (a remote desktop would lose its connection if moved)
             _tabMenuDock.Visible = _menuTarget?.Term != null;
             _tabMenuDock.Text = _menuTarget is { Docked: true } ? "Move back to a tab" : "Dock to bottom";
+            _tabMenuReconnect.Visible = _menuTarget is { Kind: Protocol.Rdp or Protocol.Ssh };
             var (strip, index) = TabPosition(_menuTarget);
             _tabMenuLeft.Enabled = index > 0;
             _tabMenuRight.Enabled = strip != null && index >= 0 && index < strip.TabCount - 1;
         };
+        _tabMenuReconnect.Click += async (_, _) => await ReconnectSessionAsync(_menuTarget);
+        _placeholderMenu.Items.Add("&Reconnect", null, async (_, _) => { if (_placeholderTarget != null) await ActivatePlaceholderAsync(_placeholderTarget); });
+        _placeholderMenu.Items.Add("Close tab", null, (_, _) =>
+        {
+            if (_placeholderTarget == null || !_placeholders.Remove(_placeholderTarget)) return;
+            _tabs.TabPages.Remove(_placeholderTarget);
+            _placeholderTarget.Dispose();
+            UpdateMainTabsVisibility();
+        });
+        _placeholderMenu.Opening += (_, _) => Theme.ApplyMenu(_placeholderMenu);
         _tabMenuLeft.Click += (_, _) => MoveTabBy(_menuTarget, -1);
         _tabMenuRight.Click += (_, _) => MoveTabBy(_menuTarget, +1);
         _tabs.TabsReordered += () => Log.Write("Tabs reordered");
@@ -1581,7 +1597,7 @@ internal sealed class MainForm : Form
         var def = Shells.Default(_settings.DefaultShell);
         foreach (var shell in Shells.Available())
         {
-            var item = new ToolStripMenuItem(shell.Id == def.Id ? shell.Name + "  (default, Ctrl+T)" : shell.Name);
+            var item = new ToolStripMenuItem(shell.Id == def.Id ? shell.Name + "  (default, Ctrl+T)" : shell.Name, ShellIcons.For(shell));
             var chosen = shell;
             item.Click += async (_, _) => await OpenShellAsync(chosen, docked);
             items.Add(item);
@@ -1591,7 +1607,7 @@ internal sealed class MainForm : Form
         items.Add(new ToolStripSeparator());
         var claudeCode = Shells.ClaudeCode();
         items.Add(claudeCode != null
-            ? new ToolStripMenuItem("Claude Code", null, async (_, _) => await OpenShellAsync(claudeCode, docked))
+            ? new ToolStripMenuItem("Claude Code", ShellIcons.For(claudeCode), async (_, _) => await OpenShellAsync(claudeCode, docked))
             : new ToolStripMenuItem("Install Claude Code ...", null, async (_, _) => await InstallClaudeCodeAsync(docked)));
         items.Add(new ToolStripMenuItem("Claude (claude.ai)", null, async (_, _) => await OpenClaudeWebAsync()));
 
@@ -1860,6 +1876,39 @@ internal sealed class MainForm : Form
             _settings.Save();
         }
         catch (Exception ex) { Log.Write("Couldn't save the layout: " + ex.Message); }
+    }
+
+    /// <summary>
+    /// Tab menu > Reconnect. SSH reconnects in place (as Enter does when it has ended). Remote Desktop gets a fresh
+    /// connection and tunnel with the same user (and a typed Connect as or one-off password, kept in memory), in the
+    /// same position: for a session left stale after Windows was locked and its tunnel timed out.
+    /// </summary>
+    private async Task ReconnectSessionAsync(Session s)
+    {
+        if (s == null || !_sessions.Contains(s)) return;
+        Log.Write($"Reconnecting {s.Inst.Name} ({s.Kind}) from the tab menu");
+        if (s.Kind == Protocol.Ssh)
+        {
+            await RunSshAsync(s, reconnect: true);
+            return;
+        }
+        if (s.Kind != Protocol.Rdp) return;
+
+        var inst = s.Inst;
+        string asUser = s.AsUser, asPassword = s.AsPassword;
+        string oneOff = inst.Saved != null && _adHocPasswords.TryGetValue(inst.Saved.Id, out var typed) ? typed : null;
+        int index = _tabs.TabPages.IndexOf(s.Page);
+        SetStatus($"Reconnecting to {inst.Name} ...");
+        CloseSession(s);
+        if (oneOff != null) _adHocPasswords[inst.Saved.Id] = oneOff;   // closing forgets it; this connection still needs it
+
+        await ConnectAsync(inst, Protocol.Rdp, asUser, asPassword ?? "");
+        var fresh = _sessions.LastOrDefault(x => x.Inst.Id == inst.Id && x.Kind == Protocol.Rdp && x.AsUser == asUser);
+        if (fresh != null && index >= 0)
+        {
+            int now = _tabs.TabPages.IndexOf(fresh.Page);
+            if (now >= 0) _tabs.MoveTab(now, Math.Min(index, _tabs.TabCount - 1));   // back where it was (no page is detached)
+        }
     }
 
     /// <summary>Which strip a session's tab is on (main or docked), and its position there.</summary>
@@ -2334,6 +2383,7 @@ internal sealed class MainForm : Form
 
         var inst = new Instance { Name = name, Id = "shell:" + Guid.NewGuid().ToString("N"), Type = shell.Id };
         var page = new TabPage(ThemedTabControl.IconSpace + name) { BackColor = Theme.Current.Back, Tag = ThemedTabControl.ShellTag };
+        ThemedTabControl.SetTabIcon(page, ShellIcons.For(shell));   // its program's own icon (cmd, PowerShell, pwsh, Git Bash, WSL ...)
         var term = new TerminalHost { Dock = DockStyle.Fill, EndedAction = "restart" };
         term.AppShortcut += key => OnAppShortcut(key, _sessions.FirstOrDefault(x => x.Term == term));
         // Esc on an ended terminal closes its tab (after this key event, since closing destroys the terminal)
@@ -2653,7 +2703,15 @@ internal sealed class MainForm : Form
             if (!strip.GetTabRect(i).Contains(e.Location)) continue;
             var page = strip.TabPages[i];
             var session = _sessions.FirstOrDefault(x => x.Page == page);
-            if (session == null) return;
+            if (session == null)
+            {
+                if (e.Button == MouseButtons.Right && _placeholders.ContainsKey(page))
+                {
+                    _placeholderTarget = page;
+                    _placeholderMenu.Show(strip, e.Location);
+                }
+                return;
+            }
 
             if (e.Button == MouseButtons.Middle) CloseSession(session);
             else if (e.Button == MouseButtons.Right)

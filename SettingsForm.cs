@@ -1064,8 +1064,10 @@ internal sealed class SettingsForm : Form
             logo,
             Title(AppInfo.Name),
             Accent("Version " + AppInfo.Version),
-            Muted("Remote Desktop and SSH sessions in tabs: to your AWS servers through Systems Manager (no console, " +
-                  "no open ports), and to any other computer directly. Plus start, stop and reboot for EC2."),
+            Muted("All your servers in one window. Remote Desktop, SSH, your shells and Claude sit side by side in tabs, " +
+                  "whether a server lives in AWS or on your own network, and AWS servers connect securely without opening any ports."),
+            Muted("Build new servers, resize them, back them up, patch them and run commands across several at once, all " +
+                  "without opening the AWS console. And next time, your tabs and layout are right where you left them."),
             Muted(AppInfo.Copyright),
 
             Heading("Links"),
