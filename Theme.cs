@@ -675,6 +675,29 @@ internal sealed class ThemedTabControl : TabControl
     /// <summary>Put this in front of a shell tab's text, to make room for its icon.</summary>
     public const string IconSpace = "      ";
 
+    /// <summary>
+    /// Remote tabs: a small badge before the name (AWS for servers reached through Session Manager; RDP or SSH for
+    /// saved connections). The page's Tag is BadgeTag(badge) and its text starts with BadgeRoom(badge).
+    /// </summary>
+    public const string BadgeTagPrefix = "badge:";
+    private const int BadgeHeight = 16, BadgeGap = 6;
+    private static readonly Font BadgeFont = new("Segoe UI", 7F, FontStyle.Bold);
+    public static string BadgeTag(string badge) => BadgeTagPrefix + badge;
+
+    private static int BadgeWidth(string badge) =>
+        TextRenderer.MeasureText(badge, BadgeFont, Size.Empty, TextFormatFlags.NoPadding).Width + 10;
+
+    /// <summary>Spaces in front of a tab's text that leave room for its badge, measured in this strip's font.</summary>
+    public string BadgeRoom(string badge)
+    {
+        int space = Math.Max(1, TextRenderer.MeasureText("x x", Font).Width - TextRenderer.MeasureText("xx", Font).Width);
+        int need = BadgeWidth(badge) + BadgeGap;
+        return new string(' ', (need + space - 1) / space);
+    }
+
+    private static Color Blend(Color a, Color b, double t) =>
+        Color.FromArgb((int)(a.R + (b.R - a.R) * t), (int)(a.G + (b.G - a.G) * t), (int)(a.B + (b.B - a.B) * t));
+
     private const int CloseSize = 16;
     private const int PlusSize = 22;
     private const int WM_LBUTTONDOWN = 0x0201;
@@ -875,6 +898,36 @@ internal sealed class ThemedTabControl : TabControl
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 text = text.TrimStart();
                 textRect = new Rectangle(textRect.Left + 22, textRect.Top, Math.Max(0, textRect.Width - 22), textRect.Height);
+            }
+            else if (TabPages[i].Tag is string tag && tag.StartsWith(BadgeTagPrefix, StringComparison.Ordinal))
+            {
+                // the badge in the room BadgeRoom made: AWS in AWS's orange, saved connections in the accent colour;
+                // softened on tabs that aren't selected
+                string badge = tag[BadgeTagPrefix.Length..];
+                int w = BadgeWidth(badge);
+                var pill = new Rectangle(textRect.Left, textRect.Top + (textRect.Height - BadgeHeight) / 2 + 1, w, BadgeHeight);
+                bool aws = badge == "AWS";
+                var fill = aws ? Color.FromArgb(0xFF, 0x99, 0x00) : p.Accent;
+                var fore = aws ? Color.FromArgb(0x23, 0x2F, 0x3E) : p.AccentText;
+                if (!sel) { fill = Blend(fill, p.Back, 0.35); fore = Blend(fore, fill, 0.15); }
+                var oldMode = g.SmoothingMode;
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                using (var path = new System.Drawing.Drawing2D.GraphicsPath())
+                using (var brush = new SolidBrush(fill))
+                {
+                    int d = 8;   // corner diameter
+                    path.AddArc(pill.Left, pill.Top, d, d, 180, 90);
+                    path.AddArc(pill.Right - d, pill.Top, d, d, 270, 90);
+                    path.AddArc(pill.Right - d, pill.Bottom - d, d, d, 0, 90);
+                    path.AddArc(pill.Left, pill.Bottom - d, d, d, 90, 90);
+                    path.CloseFigure();
+                    g.FillPath(brush, path);
+                }
+                g.SmoothingMode = oldMode;
+                TextRenderer.DrawText(g, badge, BadgeFont, pill, fore,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+                text = text.TrimStart();
+                textRect = new Rectangle(textRect.Left + w + BadgeGap, textRect.Top, Math.Max(0, textRect.Width - w - BadgeGap), textRect.Height);
             }
             TextRenderer.DrawText(g, text, Font, textRect, sel ? p.Text : p.Muted,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter |

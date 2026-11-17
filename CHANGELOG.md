@@ -3,6 +3,15 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.15.0 (2026-11-29)
+
+- Remote tabs show where they connect, as a small badge before the name: AWS (in AWS orange) for servers reached
+  through Session Manager, RDP or SSH (in the accent colour) for saved connections. Before the name, so long names
+  don't hide it.
+- Server window, Screen and log: the console screenshot refreshes every 5 seconds while that page is showing ("Refresh
+  every 5 seconds", on by default), with the time it was taken under it. It stops when another page is shown or the
+  window closes.
+
 ## 3.14.0 (2026-11-28)
 
 - Tabs can be rearranged: drag a tab along the strip (main tabs and the docked panel), or right-click it > Move left /

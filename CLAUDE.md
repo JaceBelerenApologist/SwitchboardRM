@@ -332,6 +332,10 @@ commands by `$LASTEXITCODE`, never by stderr (9.1). Parse-check with
     read a signed exe's signer; it's used deliberately in `Updater.cs` with the warning suppressed around it.
 26. **GitHub answers 404, not 401/403, for a private repository to unauthenticated API calls.** The updater's
     `releases/latest` check therefore fails while the repo is private (see 14).
+25b. **Tab icons and badges are drawn by `ThemedTabControl`, in room made with leading spaces in the tab text** (the
+    native control sizes tabs from their text). Shell tabs: `Tag = ShellTag`, text `IconSpace + name`. Remote tabs:
+    `Tag = BadgeTag("AWS"|"RDP"|"SSH")`, text `BadgeRoom(badge) + title` (spaces measured in the strip's font). Every
+    remote title change must go through `MainForm.Badged(...)` or the badge overlaps the name.
 26a. **Reordering tabs must not remove and re-insert pages:** taking an RDP page out of its TabControl (even
     briefly) drops the connection. `ThemedTabControl.MoveTab` reorders by assigning positions
     (`TabPages[i] = page`, which only relabels the native tab items) in neighbour swaps, then sets `SelectedIndex`.

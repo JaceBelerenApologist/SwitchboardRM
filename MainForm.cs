@@ -1262,7 +1262,8 @@ internal sealed class MainForm : Form
                 }
             }
 
-            var page = new TabPage(asUser == null ? inst.Name : $"{inst.Name} ({asUser})") { BackColor = Theme.Current.Back };
+            var page = new TabPage(Badged(inst, Protocol.Rdp, asUser == null ? inst.Name : $"{inst.Name} ({asUser})"))
+                { BackColor = Theme.Current.Back, Tag = ThemedTabControl.BadgeTag(BadgeFor(inst, Protocol.Rdp)) };
             var host = new RdpHost(clsid) { Dock = DockStyle.Fill };
             host.Enter += (_, _) => _tabKeys?.Install();   // stay ahead of the RDP control's own keyboard hook
             host.FocusReleased += direction => SwitchTab(direction < 0 ? -1 : +1);   // Ctrl+Alt+Left / Right
@@ -1876,6 +1877,13 @@ internal sealed class MainForm : Form
         strip.MoveTab(index, Math.Clamp(index + delta, 0, strip.TabCount - 1));
     }
 
+    /// <summary>A remote tab's badge: AWS (through Session Manager), or the protocol of a saved connection.</summary>
+    private static string BadgeFor(Instance inst, Protocol protocol) =>
+        !inst.IsSaved ? "AWS" : protocol == Protocol.Ssh ? "SSH" : "RDP";
+
+    /// <summary>A remote tab's text: room for its badge (drawn by the tab strip), then the title.</summary>
+    private string Badged(Instance inst, Protocol protocol, string title) => _tabs.BadgeRoom(BadgeFor(inst, protocol)) + title;
+
     // ---------------------------------------------------------------- restoring tabs
 
     /// <summary>The open tabs, in order (main tabs, then docked), and the terminals among them (by index in Tabs).</summary>
@@ -2016,7 +2024,8 @@ internal sealed class MainForm : Form
     private TabPage AddPlaceholder(TabState tab)
     {
         string title = tab.Name + (tab.Kind == "ssh" ? " · SSH" : "") + (tab.AsUser != null ? $" ({tab.AsUser})" : "");
-        var page = new TabPage(title) { BackColor = Theme.Current.Back };
+        string badge = tab.IsAws ? "AWS" : tab.Kind == "ssh" ? "SSH" : "RDP";
+        var page = new TabPage(_tabs.BadgeRoom(badge) + title) { BackColor = Theme.Current.Back, Tag = ThemedTabControl.BadgeTag(badge) };
         var label = new Label
         {
             Text = $"{title} was open last time.", AutoSize = true, UseMnemonic = false, Anchor = AnchorStyles.None,
@@ -2397,7 +2406,8 @@ internal sealed class MainForm : Form
             return;
         }
 
-        var page = new TabPage(inst.Name + " · SSH" + (asUser == null ? "" : $" ({asUser})")) { BackColor = Theme.Current.Back };
+        var page = new TabPage(Badged(inst, Protocol.Ssh, inst.Name + " · SSH" + (asUser == null ? "" : $" ({asUser})")))
+            { BackColor = Theme.Current.Back, Tag = ThemedTabControl.BadgeTag(BadgeFor(inst, Protocol.Ssh)) };
         var term = new TerminalHost { Dock = DockStyle.Fill };
         term.AppShortcut += key => OnAppShortcut(key, _sessions.FirstOrDefault(x => x.Term == term));
         // Esc on an ended terminal closes its tab (after this key event, since closing destroys the terminal)
@@ -2425,7 +2435,7 @@ internal sealed class MainForm : Form
         }
         term.SessionEnded += _ =>
         {
-            page.Text = inst.Name + " · SSH (ended)";
+            page.Text = Badged(inst, Protocol.Ssh, inst.Name + " · SSH (ended)");
             session.Tunnel?.Dispose();   // nothing is using it any more
             session.Tunnel = null;
         };
@@ -2458,7 +2468,7 @@ internal sealed class MainForm : Form
         if (reconnect)
         {
             term.Reset();
-            s.Page.Text = inst.Name + " · SSH" + (s.AsUser == null ? "" : $" ({s.AsUser})");
+            s.Page.Text = Badged(inst, Protocol.Ssh, inst.Name + " · SSH" + (s.AsUser == null ? "" : $" ({s.AsUser})"));
         }
 
         if (!inst.IsSaved)
@@ -2616,7 +2626,7 @@ internal sealed class MainForm : Form
             else if (!s.Flagged && (s.SawActivity || (DateTime.Now - s.Started).TotalSeconds > 45))
             {
                 s.Flagged = true;
-                s.Page.Text = s.Inst.Name + " (not connected)";
+                s.Page.Text = Badged(s.Inst, s.Kind, s.Inst.Name + " (not connected)");
             }
         }
     }

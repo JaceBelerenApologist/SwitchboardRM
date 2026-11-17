@@ -34,6 +34,10 @@ internal sealed class ServerForm : Form
     // screen and log
     private readonly PictureBox _screen = new() { Width = PageWidth, Height = 360, SizeMode = PictureBoxSizeMode.Zoom, BorderStyle = BorderStyle.FixedSingle };
     private readonly TextBox _log = Readout(PageWidth, 300);
+    private readonly ThemedCheckBox _autoShot = new() { Text = "Refresh every 5 seconds", AutoSize = true, Checked = true, Margin = new Padding(12, 10, 0, 0) };
+    private readonly Label _shotInfo = new() { AutoSize = true, UseMnemonic = false, Tag = "muted", Margin = new Padding(12, 12, 0, 0) };
+    private readonly System.Windows.Forms.Timer _shotTimer = new() { Interval = 5000 };
+    private bool _shotBusy;
     // name and tags
     private readonly TextBox _name = new() { Width = 360 };
     private readonly TextBox _tags = new() { Width = PageWidth, Height = 200, Multiline = true, ScrollBars = ScrollBars.Vertical, AcceptsReturn = true };
@@ -178,6 +182,8 @@ internal sealed class ServerForm : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        _shotTimer.Stop();
+        _shotTimer.Dispose();
         _cts.Cancel();
         base.OnFormClosed(e);
     }
@@ -201,6 +207,8 @@ internal sealed class ServerForm : Form
     private async void ShowPage(int index)
     {
         ShowPageNow(index);
+        UpdateShotTimer();
+        if (index == 1 && _autoShot.Checked) await ScreenshotAsync(quiet: true);
         if (index == 4) await LoadTypesAsync();
         if (index == 6) await LoadNetworkAsync();
         if (index == 7) await LoadBackupsAsync();
@@ -241,13 +249,15 @@ internal sealed class ServerForm : Form
     {
         var shot = new Button { Text = "Take a screenshot", AutoSize = true, MinimumSize = new Size(140, 30), Margin = new Padding(0, 6, 0, 0) };
         shot.Click += async (_, _) => await ScreenshotAsync();
+        _autoShot.CheckedChanged += (_, _) => UpdateShotTimer();
+        _shotTimer.Tick += async (_, _) => await ScreenshotAsync(quiet: true);
         var log = new Button { Text = "Get the system log", AutoSize = true, MinimumSize = new Size(140, 30), Margin = new Padding(0, 6, 0, 0) };
         log.Click += async (_, _) => await SystemLogAsync();
         return Page(
             Heading("Console screenshot", first: true),
             Note("What the server's screen shows right now: stuck at boot, a blue screen, installing updates ... AWS captures it " +
                  "even when Remote Desktop and Session Manager can't reach the server."),
-            _screen, shot,
+            _screen, Row(shot, _autoShot, _shotInfo),
             Heading("System log"),
             Note("The server's boot and console output. Newer instance types give the latest output; older ones, AWS's last capture."),
             _log, log);
@@ -472,23 +482,46 @@ internal sealed class ServerForm : Form
         _ => status,
     };
 
-    private async Task ScreenshotAsync()
+    /// <summary>The automatic refresh runs only while the Screen and log page is showing (and the box is ticked).</summary>
+    private void UpdateShotTimer()
     {
-        Status("Asking AWS for a screenshot ...");
+        bool run = _current == 1 && _autoShot.Checked && !IsDisposed;
+        if (run && !_shotTimer.Enabled) _shotTimer.Start();
+        else if (!run && _shotTimer.Enabled) _shotTimer.Stop();
+    }
+
+    /// <param name="quiet">The automatic refresh: report under the picture, not in the status line.</param>
+    private async Task ScreenshotAsync(bool quiet = false)
+    {
+        if (_shotBusy) return;   // the previous one is still on its way
+        _shotBusy = true;
+        if (!quiet) Status("Asking AWS for a screenshot ...");
         try
         {
             var bytes = await ServerAdmin.ScreenshotAsync(_profile, _region, _instanceId, _cts.Token);
-            if (bytes.Length == 0) { Status("AWS returned no screenshot (the server may be stopped).", accent: true); return; }
+            if (bytes.Length == 0)
+            {
+                if (quiet) _shotInfo.Text = $"No screenshot at {DateTime.Now:HH:mm:ss} (the server may be stopped)";
+                else Status("AWS returned no screenshot (the server may be stopped).", accent: true);
+                return;
+            }
             // copied into a bitmap of its own: an image read from a stream needs that stream for its whole life
             using var ms = new MemoryStream(bytes);
             using var loaded = Image.FromStream(ms, true, true);
             var old = _screen.Image;
             _screen.Image = new Bitmap(loaded);
             old?.Dispose();
-            Status($"Screenshot taken at {DateTime.Now:HH:mm:ss}.");
+            _shotInfo.Text = $"Taken at {DateTime.Now:HH:mm:ss}";
+            if (!quiet) Status("");
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { Status("No screenshot: " + Aws.Describe(ex), accent: true); }
+        catch (ObjectDisposedException) { }   // the window closed while it was on its way
+        catch (Exception ex)
+        {
+            if (quiet) _shotInfo.Text = $"No screenshot at {DateTime.Now:HH:mm:ss}: {Aws.Describe(ex)}";
+            else Status("No screenshot: " + Aws.Describe(ex), accent: true);
+        }
+        finally { _shotBusy = false; }
     }
 
     private async Task SystemLogAsync()
