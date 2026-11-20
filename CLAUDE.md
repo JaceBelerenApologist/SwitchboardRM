@@ -336,6 +336,13 @@ commands by `$LASTEXITCODE`, never by stderr (9.1). Parse-check with
     native control sizes tabs from their text). Shell tabs: `Tag = ShellTag`, text `IconSpace + name`. Remote tabs:
     `Tag = BadgeTag("AWS"|"RDP"|"SSH")`, text `BadgeRoom(badge) + title` (spaces measured in the strip's font). Every
     remote title change must go through `MainForm.Badged(...)` or the badge overlaps the name.
+25c. **DPI: the app is `PerMonitorV2` (since 3.17.0; it was `SystemAware`, which made Windows bitmap-stretch it on
+    screens scaled differently from the sign-in primary: maximized windows a pixel short, blurry text).** Every form
+    gets `Theme.EnableDpiRescaling` (from `Theme.Apply` / `ApplyTitleBar`): `AutoScaleMode = Dpi` with
+    `AutoScaleDimensions = CurrentAutoScaleDimensions`, so it keeps the sizes it was built with on its first screen and
+    WinForms rescales it when it moves to another DPI. Size new UI with `LogicalToDeviceUnits` / `DeviceDpi` where it
+    must track the current screen. Owner-drawn constants in `ThemedTabControl` (close ×, badges, 16 px icons) are fixed
+    pixels: they don't follow a DPI change yet.
 26a. **Reordering tabs must not remove and re-insert pages:** taking an RDP page out of its TabControl (even
     briefly) drops the connection. `ThemedTabControl.MoveTab` reorders by assigning positions
     (`TabPages[i] = page`, which only relabels the native tab items) in neighbour swaps, then sets `SelectedIndex`.

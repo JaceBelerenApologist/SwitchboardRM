@@ -244,8 +244,21 @@ internal static class Theme
     }
 
     /// <summary>Switch the whole window (plus any menus that aren't in its control tree) to light or dark.</summary>
+    /// <summary>
+    /// Per-monitor scaling (Program: HighDpiMode.PerMonitorV2): a window keeps the sizes it was built with on the screen
+    /// it opens on (as before), and WinForms rescales it, fonts and controls, when it moves to a screen with a different
+    /// scaling. Done once per window, from Apply and ApplyTitleBar (every window passes through one of them).
+    /// </summary>
+    public static void EnableDpiRescaling(Form form)
+    {
+        if (form == null || form.AutoScaleMode == AutoScaleMode.Dpi && form.AutoScaleDimensions != SizeF.Empty) return;
+        form.AutoScaleMode = AutoScaleMode.Dpi;
+        form.AutoScaleDimensions = form.CurrentAutoScaleDimensions;   // "built for this screen": no rescaling now, only on moves
+    }
+
     public static void Apply(Form form, bool dark, params ToolStrip[] extraStrips)
     {
+        EnableDpiRescaling(form);
         Current = Palette.Create(dark, Accent);
         var renderer = new ThemedRenderer(Current);
 
@@ -388,6 +401,7 @@ internal static class Theme
     /// <summary>Dark title bar (Windows 10 2004+ / 11) and a purple window border (Windows 11).</summary>
     public static void ApplyTitleBar(Form f)
     {
+        EnableDpiRescaling(f);
         if (!f.IsHandleCreated) return;
         try
         {

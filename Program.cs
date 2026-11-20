@@ -8,7 +8,9 @@ internal static class Program
     private static void Main()
     {
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
-        Application.SetHighDpiMode(HighDpiMode.SystemAware);
+        // per-monitor scaling: each window is drawn natively at its screen's scaling, never stretched by Windows (stretching
+        // left maximized windows a pixel short of the screen edges and blurred text on screens scaled differently)
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 

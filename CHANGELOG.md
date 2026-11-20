@@ -3,6 +3,14 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.17.0 (2026-12-01)
+
+- Per-monitor display scaling: Switchboard now draws its windows natively at each screen's own scaling instead of
+  having Windows stretch them. Fixed: a maximized window could fall a pixel short of the screen's edges (a line of
+  wallpaper showing, and clicks at the very top going to the window behind it), and text could look slightly blurry,
+  on screens whose scaling differs from the main one at sign-in, or after the scaling changed. Windows look the same as
+  before on the screen they open on, and rescale when moved to a screen with different scaling.
+
 ## 3.16.0 (2026-11-30)
 
 - Reconnect on a tab's right-click menu: for a session left stale, for example after Windows was locked long enough
