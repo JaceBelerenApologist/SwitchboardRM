@@ -3,6 +3,16 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.17.1 (2026-12-02)
+
+- Fixed: a Remote Desktop tab closed as soon as its connection dropped, even when that was a network blip (switching
+  from cable to Wi-Fi, sleep, a dead tunnel) or the server restarting. Now only a deliberate end closes it: signing
+  out or choosing Disconnect inside the server, another connection taking over, or closing the tab. A lost connection
+  reconnects in the same tab instead, behind a "connection lost" notice with Reconnect now and Close tab: a fresh
+  Session Manager tunnel for AWS servers, retries every 5 seconds and then every 15 for up to 10 minutes, straight away
+  when the network comes back, and a wait while there's no network or the AWS sign-in has expired. Windows keeps the
+  session on the server, so it comes back as it was.
+
 ## 3.17.0 (2026-12-01)
 
 - Per-monitor display scaling: Switchboard now draws its windows natively at each screen's own scaling instead of

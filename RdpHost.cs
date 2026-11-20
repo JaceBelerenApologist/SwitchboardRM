@@ -20,6 +20,9 @@ internal interface IMsTscNonScriptable
 [ComVisible(true), Guid("336d5562-efa8-482e-8cb3-c5c0fc7a7db6"), InterfaceType(ComInterfaceType.InterfaceIsIDispatch)]
 public interface IMsTscAxEvents
 {
+    /// <summary>The session ended or was lost; discReason says how (1 = this side disconnected, 2 = the remote user, 3 = the server ...).</summary>
+    [DispId(4)] void OnDisconnected(int discReason);
+
     /// <summary>Ctrl+Alt+Left or Ctrl+Alt+Right was pressed inside the session (the control gives up the keyboard).</summary>
     [DispId(23)] void OnFocusReleased(int iDirection);
 }
@@ -28,9 +31,10 @@ public interface IMsTscAxEvents
 [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
 public sealed class RdpEventSink : IMsTscAxEvents
 {
-    private readonly Action<int> _focusReleased;
-    public RdpEventSink(Action<int> focusReleased) { _focusReleased = focusReleased; }
+    private readonly Action<int> _focusReleased, _disconnected;
+    public RdpEventSink(Action<int> focusReleased, Action<int> disconnected) { _focusReleased = focusReleased; _disconnected = disconnected; }
     public void OnFocusReleased(int iDirection) => _focusReleased?.Invoke(iDirection);
+    public void OnDisconnected(int discReason) => _disconnected?.Invoke(discReason);
 }
 
 /// <summary>
@@ -59,6 +63,12 @@ internal sealed class RdpHost : AxHost
     /// control hands back, used to move between tabs. Raised on the UI thread.
     /// </summary>
     public event Action<int> FocusReleased;
+
+    /// <summary>
+    /// The session ended or was lost: the control's reason and extended reason (see MainForm.IsDeliberateEnd). Raised on
+    /// the UI thread.
+    /// </summary>
+    public event Action<int, int> Disconnected;
     private ConnectionPointCookie _events;
 
     private readonly System.Windows.Forms.Timer _resizeTimer = new() { Interval = 400 };
@@ -133,6 +143,12 @@ internal sealed class RdpHost : AxHost
             {
                 Log.Write($"RDP released the keyboard (direction {direction})");
                 if (!IsDisposed && IsHandleCreated) BeginInvoke(() => FocusReleased?.Invoke(direction));
+            }, reason =>
+            {
+                int extended = 0;
+                try { if (GetOcx() is { } rdp) extended = Convert.ToInt32(Get(rdp, "ExtendedDisconnectReason")); } catch { }
+                Log.Write($"RDP disconnected: reason {reason}, extended reason {extended}");
+                if (!IsDisposed && IsHandleCreated) BeginInvoke(() => Disconnected?.Invoke(reason, extended));
             });
             _events = new ConnectionPointCookie(GetOcx(), sink, typeof(IMsTscAxEvents));
         }

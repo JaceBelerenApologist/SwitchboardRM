@@ -343,6 +343,11 @@ commands by `$LASTEXITCODE`, never by stderr (9.1). Parse-check with
     WinForms rescales it when it moves to another DPI. Size new UI with `LogicalToDeviceUnits` / `DeviceDpi` where it
     must track the current screen. Owner-drawn constants in `ThemedTabControl` (close ×, badges, 16 px icons) are fixed
     pixels: they don't follow a DPI change yet.
+25d. **A dropped RDP connection isn't necessarily the end.** `RdpHost.Disconnected` (the control's `OnDisconnected`,
+    DISPID 4, plus `ExtendedDisconnectReason`) is recorded on the session; `MainForm.IsDeliberateEnd` closes the tab
+    only for reason 1 (this side) or 2 (remote user), or extended 1, 2, 5, 11, 12 (admin disconnect/logoff, replaced,
+    user disconnect/logoff). Everything else goes to `AutoReconnectAsync`: same tab, `Session.Overlay`, new tunnel,
+    `StartRdpAsync` on the same control; retries 5 s then 15 s up to 10 min, at once on `NetworkAvailabilityChanged`.
 26a. **Reordering tabs must not remove and re-insert pages:** taking an RDP page out of its TabControl (even
     briefly) drops the connection. `ThemedTabControl.MoveTab` reorders by assigning positions
     (`TabPages[i] = page`, which only relabels the native tab items) in neighbour swaps, then sets `SelectedIndex`.

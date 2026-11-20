@@ -21,6 +21,11 @@ internal sealed class Session
     public bool SawActivity;
     public bool WasConnected;
     public bool Flagged;
+    // Remote Desktop: how it last disconnected, and reconnecting after a lost connection
+    public int DisconnectReason = -1, ExtendedReason;
+    public bool Reconnecting;
+    public Panel Overlay;
+    public TaskCompletionSource<bool> RetryNow;
     /// <summary>Connect as: this tab's own user (and typed password, kept in memory only); null = the usual credentials.</summary>
     public string AsUser;
     public string AsPassword = "";
@@ -728,6 +733,12 @@ internal sealed class MainForm : Form
         ResizeEnd += (_, _) => LayoutChanged();       // after dragging the window's edge or moving it
         SizeChanged += (_, _) => { if (Visible && WindowState != FormWindowState.Minimized) LayoutChanged(); };   // maximize / restore
         _layoutSave.Tick += (_, _) => SaveLayoutNow();
+        // the network came back (e.g. cable to Wi-Fi): tabs waiting to reconnect try again straight away
+        System.Net.NetworkInformation.NetworkChange.NetworkAvailabilityChanged += (_, e) =>
+        {
+            if (!e.IsAvailable || IsDisposed) return;
+            try { BeginInvoke(() => { foreach (var x in _sessions.Where(x => x.Reconnecting)) x.RetryNow?.TrySetResult(true); }); } catch { }
+        };
         _dockSplit.MouseDoubleClick += (_, _) =>   // double-click the bar: back to a third of the height
         {
             if (_dockMinimized) { SetDockMinimized(false); return; }
@@ -1290,6 +1301,7 @@ internal sealed class MainForm : Form
             _tabs.SelectedTab = page;
 
             var session = new Session { Inst = inst, Tunnel = tunnel, Rdp = host, Page = page, AsUser = asUser, AsPassword = asPassword ?? "" };
+            host.Disconnected += (reason, extended) => { session.DisconnectReason = reason; session.ExtendedReason = extended; };
             _sessions.Add(session);
 
             try
@@ -1886,6 +1898,7 @@ internal sealed class MainForm : Form
     private async Task ReconnectSessionAsync(Session s)
     {
         if (s == null || !_sessions.Contains(s)) return;
+        if (s.Reconnecting) { s.RetryNow?.TrySetResult(true); return; }
         Log.Write($"Reconnecting {s.Inst.Name} ({s.Kind}) from the tab menu");
         if (s.Kind == Protocol.Ssh)
         {
@@ -2667,11 +2680,17 @@ internal sealed class MainForm : Form
                     SetStatus($"Connected to {s.Inst.Name}");
                     s.Rdp.SyncSize(); // in case the window changed size while connecting
                 }
+                if (state == 1 && s.Reconnecting) FinishReconnect(s);
             }
+            else if (s.Reconnecting || s.Overlay is { Visible: true }) continue;   // being reconnected, or waiting for a click
             else if (s.WasConnected)
             {
-                SetStatus($"{s.Inst.Name} disconnected");
-                CloseSession(s);
+                if (IsDeliberateEnd(s))
+                {
+                    SetStatus($"{s.Inst.Name} disconnected");
+                    CloseSession(s);
+                }
+                else _ = AutoReconnectAsync(s);
             }
             else if (!s.Flagged && (s.SawActivity || (DateTime.Now - s.Started).TotalSeconds > 45))
             {
@@ -2679,6 +2698,134 @@ internal sealed class MainForm : Form
                 s.Page.Text = Badged(s.Inst, s.Kind, s.Inst.Name + " (not connected)");
             }
         }
+    }
+
+    // ---------------------------------------------------------------- reconnecting a lost Remote Desktop connection
+
+    /// <summary>
+    /// The session was ended on purpose (the tab closes): this side disconnected (1), the remote user disconnected or
+    /// signed out (2), or the server ended it for an administrative reason, a logoff or another connection taking over
+    /// (extended 1, 2, 5, 11, 12). Anything else (a network drop, a timeout, the tunnel dying, the server restarting)
+    /// is a lost connection, which is reconnected.
+    /// </summary>
+    private static bool IsDeliberateEnd(Session s) =>
+        s.DisconnectReason is 1 or 2 || s.ExtendedReason is 1 or 2 or 5 or 11 or 12;
+
+    private string RdpTitle(Session s, string suffix = "") =>
+        Badged(s.Inst, Protocol.Rdp, (s.AsUser == null ? s.Inst.Name : $"{s.Inst.Name} ({s.AsUser})") + suffix);
+
+    /// <summary>
+    /// A lost connection: reconnect in the same tab, behind an overlay, with a fresh tunnel for AWS servers. Retries every
+    /// 5 s for half a minute, then every 15 s, for up to 10 minutes; at once when the network comes back; waits while
+    /// there's no network. Windows keeps the session on the server, so it comes back as it was.
+    /// </summary>
+    private async Task AutoReconnectAsync(Session s)
+    {
+        if (s.Reconnecting) return;
+        s.Reconnecting = true;
+        Log.Write($"{s.Inst.Name}: connection lost (reason {s.DisconnectReason}, extended {s.ExtendedReason}); reconnecting");
+        s.Page.Text = RdpTitle(s, " (reconnecting)");
+        var until = DateTime.Now.AddMinutes(10);
+        int attempt = 0;
+        while (s.Reconnecting && _sessions.Contains(s) && DateTime.Now < until)
+        {
+            attempt++;
+            if (!System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable())
+            {
+                ShowOverlay(s, $"The connection to {s.Inst.Name} was lost. Waiting for the network to come back ...", waiting: true);
+            }
+            else
+            {
+                ShowOverlay(s, $"The connection to {s.Inst.Name} was lost. Reconnecting (attempt {attempt}) ...", waiting: true);
+                try
+                {
+                    if (!s.Inst.IsSaved)
+                    {
+                        // a fresh Session Manager tunnel: the old one ended with the connection
+                        try { s.Tunnel?.Dispose(); } catch { }
+                        s.Tunnel = null;
+                        s.Tunnel = await Tunnel.StartAsync(s.Inst, Profile);
+                    }
+                    s.DisconnectReason = -1;
+                    s.ExtendedReason = 0;
+                    await StartRdpAsync(s);
+                    // give it up to 30 s; PollSessions finishes the reconnect as soon as it's connected
+                    for (int i = 0; i < 60 && s.Reconnecting; i++)
+                    {
+                        await Task.Delay(500);
+                        int state = 0;
+                        try { state = s.Rdp.ConnectionState(); } catch { }
+                        if (state == 1) { FinishReconnect(s); return; }
+                        if (state == 0 && i >= 6) break;   // gave up connecting this time
+                    }
+                    if (!s.Reconnecting) return;
+                    // ended on purpose while reconnecting (e.g. signed out elsewhere): stop
+                    if (IsDeliberateEnd(s)) { s.Reconnecting = false; CloseSession(s); return; }
+                }
+                catch (Exception ex)
+                {
+                    Log.Write($"{s.Inst.Name}: reconnect attempt {attempt} failed: {ex.Message}");
+                    if (ex is TunnelException && ex.Message.Contains("sign", StringComparison.OrdinalIgnoreCase))
+                        ShowOverlay(s, $"The connection to {s.Inst.Name} was lost, and the AWS sign-in has expired. " +
+                                       "It reconnects once you're signed in again.", waiting: true);
+                }
+            }
+            // wait before the next try (or less, if the network comes back or Reconnect now is clicked)
+            s.RetryNow = new TaskCompletionSource<bool>();
+            await Task.WhenAny(s.RetryNow.Task, Task.Delay(attempt < 6 ? 5000 : 15000));
+        }
+        if (!s.Reconnecting || !_sessions.Contains(s)) return;
+        s.Reconnecting = false;
+        s.Page.Text = RdpTitle(s, " (disconnected)");
+        ShowOverlay(s, $"Couldn't reconnect to {s.Inst.Name}.", waiting: false);
+        SetStatus($"Couldn't reconnect to {s.Inst.Name}.");
+    }
+
+    private void FinishReconnect(Session s)
+    {
+        if (!s.Reconnecting) return;
+        s.Reconnecting = false;
+        s.RetryNow?.TrySetResult(true);
+        if (s.Overlay != null) s.Overlay.Visible = false;
+        s.Page.Text = RdpTitle(s);
+        try { s.Rdp.SyncSize(); } catch { }
+        Log.Write($"{s.Inst.Name}: reconnected");
+        SetStatus($"Reconnected to {s.Inst.Name}");
+    }
+
+    /// <summary>The overlay over a Remote Desktop tab while it reconnects (or after it gave up): message, Reconnect now, Close tab.</summary>
+    private void ShowOverlay(Session s, string message, bool waiting)
+    {
+        if (s.Overlay == null)
+        {
+            var panel = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Current.Back };
+            var label = new Label { AutoSize = true, UseMnemonic = false, ForeColor = Theme.Current.Text, Anchor = AnchorStyles.None, Margin = new Padding(0, 0, 0, 14), MaximumSize = new Size(LogicalToDeviceUnits(520), 0) };
+            var retry = new Button { Text = "Reconnect now", Tag = "primary", AutoSize = true, MinimumSize = new Size(LogicalToDeviceUnits(130), LogicalToDeviceUnits(32)), Margin = new Padding(0, 0, 8, 0) };
+            var close = new Button { Text = "Close tab", AutoSize = true, MinimumSize = new Size(LogicalToDeviceUnits(100), LogicalToDeviceUnits(32)) };
+            retry.Click += (_, _) =>
+            {
+                if (s.Reconnecting) s.RetryNow?.TrySetResult(true);
+                else _ = AutoReconnectAsync(s);   // it had given up: start again
+            };
+            close.Click += (_, _) => { s.Reconnecting = false; CloseSession(s); };
+            var buttons = new FlowLayoutPanel { AutoSize = true, Anchor = AnchorStyles.None, WrapContents = false };
+            buttons.Controls.AddRange(new Control[] { retry, close });
+            var center = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
+            center.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+            center.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            center.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            center.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+            center.Controls.Add(label, 0, 1);
+            center.Controls.Add(buttons, 0, 2);
+            panel.Controls.Add(center);
+            panel.Tag = label;
+            s.Page.Controls.Add(panel);
+            s.Overlay = panel;
+            ApplyTheme();   // the overlay's buttons and colours, like the rest of the window
+        }
+        ((Label)s.Overlay.Tag).Text = message + (waiting ? "\n\nWindows keeps your session on the server, so you'll be back where you were." : "");
+        s.Overlay.Visible = true;
+        s.Overlay.BringToFront();
     }
 
     private void CloseSession(Session s)
