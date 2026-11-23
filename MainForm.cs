@@ -15,6 +15,9 @@ internal sealed class Session
     public RdpHost Rdp;          // Remote Desktop sessions
     public TerminalHost Term;    // SSH sessions and local shells
     public ClaudeWebHost Web;    // the claude.ai tab (a page, not a terminal)
+    public VncHost Vnc;          // VNC tabs (noVNC through a local relay)
+    public bool VncTriedSaved;   // the saved VNC password was already offered this time
+    public string VncProblem = "";
     public bool Docked;          // in the docked-terminal panel under the tabs, not a tab of its own
     public TabPage Page;
     public DateTime Started = DateTime.Now;
@@ -125,6 +128,7 @@ internal sealed class MainForm : Form
     private readonly ToolStripMenuItem _tabMenuDock = new("Dock to bottom");
     private readonly ToolStripMenuItem _tabMenuReconnect = new("&Reconnect");
     private readonly ToolStripMenuItem _tabMenuCad = new("Send Ctrl+Alt+&Del");
+    private readonly ToolStripMenuItem _tabMenuPaste = new("Send clipboard text");
     private readonly ContextMenuStrip _placeholderMenu = new();   // restored tabs waiting for a click
     private TabPage _placeholderTarget;
     private readonly ToolStripMenuItem _tabMenuLeft = new("Move left");
@@ -156,6 +160,7 @@ internal sealed class MainForm : Form
     private readonly ToolStripMenuItem _smConnectRdp = new("Connect with Remote &Desktop");
     private readonly ToolStripMenuItem _miConnectSsh = new("Connect with SSH");
     private readonly ToolStripMenuItem _miConnectRdp = new("Connect with Remote Desktop");
+    private readonly ToolStripMenuItem _miConnectVnc = new("Connect with VNC");
     private readonly ToolStripMenuItem _miConnectAs = new("Connect &as ...");
     private readonly ToolStripMenuItem _smStart = new("&Start");
     private readonly ToolStripMenuItem _smStop = new("S&top ...");
@@ -503,6 +508,7 @@ internal sealed class MainForm : Form
             item.Click += async (_, _) => { var i = Selected(); if (i != null) await ConnectAsync(i, Protocol.Ssh); };
         foreach (var item in new ToolStripItem[] { _miConnectRdp, _smConnectRdp })
             item.Click += async (_, _) => { var i = Selected(); if (i != null) await ConnectAsync(i, Protocol.Rdp); };
+        _miConnectVnc.Click += async (_, _) => { var i = Selected(); if (i != null) await ConnectAsync(i, Protocol.Vnc); };
         foreach (var item in new ToolStripItem[] { _miStart, _btnStart, _smStart }) item.Click += start;
         foreach (var item in new ToolStripItem[] { _miStop, _btnStop, _smStop }) item.Click += stop;
         foreach (var item in new ToolStripItem[] { _miReboot, _btnReboot, _smReboot }) item.Click += reboot;
@@ -514,7 +520,7 @@ internal sealed class MainForm : Form
         _list.SelectedIndexChanged += (_, _) => UpdateActionStates();
         _listMenu.Items.AddRange(new ToolStripItem[]
         {
-            _miConnect, _miConnectSsh, _miConnectRdp, _miConnectAs,
+            _miConnect, _miConnectSsh, _miConnectRdp, _miConnectVnc, _miConnectAs,
             new ToolStripSeparator(),
             _miStart, _miStop, _miReboot,
             new ToolStripSeparator(),
@@ -586,6 +592,7 @@ internal sealed class MainForm : Form
 
         _tabMenu.Items.Add(_tabMenuReconnect);
         _tabMenu.Items.Add(_tabMenuCad);
+        _tabMenu.Items.Add(_tabMenuPaste);
         _tabMenu.Items.Add(new ToolStripSeparator());
         _tabMenu.Items.Add(_tabMenuLeft);
         _tabMenu.Items.Add(_tabMenuRight);
@@ -597,19 +604,37 @@ internal sealed class MainForm : Form
             // only terminals can dock (a remote desktop would lose its connection if moved)
             _tabMenuDock.Visible = _menuTarget?.Term != null;
             _tabMenuDock.Text = _menuTarget is { Docked: true } ? "Move back to a tab" : "Dock to bottom";
-            _tabMenuReconnect.Visible = _menuTarget is { Kind: Protocol.Rdp or Protocol.Ssh };
-            _tabMenuCad.Visible = _menuTarget?.Rdp != null;
+            _tabMenuReconnect.Visible = _menuTarget is { Kind: Protocol.Rdp or Protocol.Ssh or Protocol.Vnc };
+            _tabMenuCad.Visible = _menuTarget?.Rdp != null || _menuTarget?.Vnc != null;
+            _tabMenuPaste.Visible = _menuTarget?.Vnc != null;
             int rdpState = 0;
             try { rdpState = _menuTarget?.Rdp?.ConnectionState() ?? 0; } catch { }
-            _tabMenuCad.Enabled = rdpState == 1;   // only into a connected session
+            _tabMenuCad.Enabled = rdpState == 1 || _menuTarget is { Vnc: not null, WasConnected: true };   // only into a connected session
+            _tabMenuPaste.Enabled = _menuTarget is { Vnc: not null, WasConnected: true };
             var (strip, index) = TabPosition(_menuTarget);
             _tabMenuLeft.Enabled = index > 0;
             _tabMenuRight.Enabled = strip != null && index >= 0 && index < strip.TabCount - 1;
         };
         _tabMenuReconnect.Click += async (_, _) => await ReconnectSessionAsync(_menuTarget);
+        _tabMenuPaste.Click += (_, _) =>
+        {
+            // VNC has no shared clipboard with this PC: this puts the text on the remote clipboard, to paste there
+            if (_menuTarget?.Vnc == null) return;
+            string text = "";
+            try { text = Clipboard.GetText(); } catch { }
+            if (text.Length == 0) { SetStatus("There's no text on the clipboard to send."); return; }
+            _menuTarget.Vnc.SendClipboard(text);
+            SetStatus($"Sent {text.Length:N0} characters to {_menuTarget.Inst.Name}'s clipboard: paste them there.");
+        };
         _tabMenuCad.Click += (_, _) =>
         {
             var target = _menuTarget;
+            if (target?.Vnc != null)
+            {
+                target.Vnc.SendCtrlAltDel();
+                SetStatus($"Sent Ctrl+Alt+Del to {target.Inst.Name}.");
+                return;
+            }
             if (target?.Rdp == null) return;
             _tabs.SelectedTab = target.Page;   // the session needs to be the one on screen to take the keys
             try
@@ -801,6 +826,7 @@ internal sealed class MainForm : Form
             sel?.Rdp?.SyncSize();
             sel?.Term?.FocusTerminal();
             sel?.Web?.FocusPage();
+            sel?.Vnc?.FocusScreen();
             if (sel?.Rdp != null) { try { sel.Rdp.Focus(); } catch { } }
             _tabKeys?.Install();
         };
@@ -1274,6 +1300,11 @@ internal sealed class MainForm : Form
             if (protocol == Protocol.Ssh)
             {
                 await OpenSshAsync(inst, asUser, replay);
+                return;
+            }
+            if (protocol == Protocol.Vnc)
+            {
+                await OpenVncAsync(inst);
                 return;
             }
 
@@ -1934,6 +1965,7 @@ internal sealed class MainForm : Form
         if (s == null || !_sessions.Contains(s)) return;
         if (s.Reconnecting) { s.RetryNow?.TrySetResult(true); return; }
         Log.Write($"Reconnecting {s.Inst.Name} ({s.Kind}) from the tab menu");
+        if (s.Kind == Protocol.Vnc) { await RestartVncAsync(s); return; }
         if (s.Kind == Protocol.Ssh)
         {
             await RunSshAsync(s, reconnect: true);
@@ -1975,10 +2007,107 @@ internal sealed class MainForm : Form
 
     /// <summary>A remote tab's badge: AWS (through Session Manager), or the protocol of a saved connection.</summary>
     private static string BadgeFor(Instance inst, Protocol protocol) =>
-        !inst.IsSaved ? "AWS" : protocol == Protocol.Ssh ? "SSH" : "RDP";
+        !inst.IsSaved ? "AWS" : protocol == Protocol.Ssh ? "SSH" : protocol == Protocol.Vnc ? "VNC" : "RDP";
+
+    /// <summary>
+    /// " · SSH" / " · VNC" after the name, for AWS tabs only: their badge says AWS whatever the protocol, while a saved
+    /// connection's badge already shows SSH or VNC. (Remote Desktop has no suffix either way.)
+    /// </summary>
+    private static string ProtocolSuffix(Instance inst, Protocol protocol) =>
+        inst.IsSaved ? "" : protocol switch { Protocol.Ssh => " · SSH", Protocol.Vnc => " · VNC", _ => "" };
 
     /// <summary>A remote tab's text: room for its badge (drawn by the tab strip), then the title.</summary>
     private string Badged(Instance inst, Protocol protocol, string title) => _tabs.BadgeRoom(BadgeFor(inst, protocol)) + title;
+
+    // ---------------------------------------------------------------- VNC
+
+    /// <summary>A VNC tab: through a Session Manager tunnel to port 5900 for an AWS server, or straight to a saved address.</summary>
+    private async Task OpenVncAsync(Instance inst)
+    {
+        Tunnel tunnel = null;
+        if (!inst.IsSaved)
+        {
+            if (!await EnsureSignedInAsync($"connecting to {inst.Name}")) { SetStatus("Not signed in to AWS."); return; }
+            SetStatus($"Opening a Session Manager tunnel to {inst.Name} (VNC, port 5900) ...");
+            try { tunnel = await Tunnel.StartAsync(inst, Profile, 5900); }
+            catch (Exception ex)
+            {
+                SetStatus("");
+                MessageBox.Show(this, $"Couldn't open a tunnel to {inst.Name} for VNC: {(ex is TunnelException ? ex.Message : Aws.Describe(ex))}",
+                    "VNC", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+        }
+        var page = new TabPage(Badged(inst, Protocol.Vnc, inst.Name + ProtocolSuffix(inst, Protocol.Vnc)))
+            { BackColor = Theme.Current.Back, Tag = ThemedTabControl.BadgeTag(BadgeFor(inst, Protocol.Vnc)) };
+        var host = new VncHost { Dock = DockStyle.Fill };
+        page.Controls.Add(host);
+        var session = new Session { Inst = inst, Kind = Protocol.Vnc, Tunnel = tunnel, Vnc = host, Page = page };
+        _sessions.Add(session);
+        _tabs.TabPages.Add(page);
+        _tabs.Visible = true;
+        _hint.Visible = false;
+        _tabs.SelectedTab = page;
+
+        host.CredentialsRequired += needUser => BeginInvoke(() => VncSignIn(session, needUser));
+        host.SecurityFailure += reason => { session.VncTriedSaved = true; session.VncProblem = reason.Length > 0 ? reason : "The password wasn't accepted."; };
+        host.Connected += () => BeginInvoke(() =>
+        {
+            session.WasConnected = true;
+            session.VncProblem = "";
+            SetStatus($"Connected to {inst.Name} (VNC)");
+        });
+        host.ReconnectRequested += () => BeginInvoke(new Action(async () => await RestartVncAsync(session)));
+        Log.Write($"VNC: connecting to {inst.Name} ({VncTarget(session)})");
+        try { await host.StartAsync(VncTarget(session).Host, VncTarget(session).Port); }
+        catch (Exception ex)
+        {
+            Log.Write("VNC tab failed to start: " + ex);
+            CloseSession(session);
+            MessageBox.Show(this, "Couldn't open the VNC tab: " + ex.Message, "VNC", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private static (string Host, int Port) VncTarget(Session s) =>
+        s.Inst.IsSaved ? (s.Inst.Saved.Host, s.Inst.Saved.Port) : ("127.0.0.1", s.Tunnel?.Port ?? 0);
+
+    /// <summary>Reconnect a VNC tab: a fresh tunnel for an AWS server, then a fresh relay and connection.</summary>
+    private async Task RestartVncAsync(Session s)
+    {
+        if (!_sessions.Contains(s) || s.Vnc == null) return;
+        s.WasConnected = false;
+        if (!s.Inst.IsSaved)
+        {
+            try { s.Tunnel?.Dispose(); } catch { }
+            s.Tunnel = null;
+            if (!await EnsureSignedInAsync($"reconnecting to {s.Inst.Name}")) { SetStatus("Not signed in to AWS."); return; }
+            try { s.Tunnel = await Tunnel.StartAsync(s.Inst, Profile, 5900); }
+            catch (Exception ex) { SetStatus($"Couldn't reopen the tunnel to {s.Inst.Name}: {ex.Message}"); return; }
+        }
+        await s.Vnc.StartAsync(VncTarget(s).Host, VncTarget(s).Port);
+    }
+
+    /// <summary>The VNC server wants a password: the saved one first (once), otherwise ask (and optionally save it).</summary>
+    private void VncSignIn(Session s, bool needUser)
+    {
+        if (!_sessions.Contains(s) || s.Vnc == null) return;
+        string key = "vnc:" + (s.Inst.IsSaved ? $"{s.Inst.Saved.Host}:{s.Inst.Saved.Port}" : s.Inst.Id);
+        if (!s.VncTriedSaved && CredentialStore.Read(key) is { Length: > 0 } saved)
+        {
+            s.VncTriedSaved = true;
+            int sep = saved.IndexOf('\u0001');
+            s.Vnc.SendCredentials(sep >= 0 ? saved[..sep] : "", sep >= 0 ? saved[(sep + 1)..] : saved);
+            return;
+        }
+        using var f = new VncLoginForm(s.Inst.Name, needUser, s.Inst.Saved?.User ?? "", s.VncProblem);
+        if (f.ShowDialog(this) != DialogResult.OK) { SetStatus($"VNC sign-in to {s.Inst.Name} cancelled."); return; }
+        if (f.SavePassword)
+        {
+            try { CredentialStore.Save(key, f.User + "\u0001" + f.Password); }
+            catch (Exception ex) { Log.Write("Couldn't save the VNC password: " + ex.Message); }
+        }
+        s.Vnc.SendCredentials(f.User, f.Password);
+    }
 
     // ---------------------------------------------------------------- restoring tabs
 
@@ -2007,7 +2136,7 @@ internal sealed class MainForm : Form
             }
             else
             {
-                tab.Kind = s.Kind == Protocol.Ssh ? "ssh" : "rdp";
+                tab.Kind = s.Kind == Protocol.Ssh ? "ssh" : s.Kind == Protocol.Vnc ? "vnc" : "rdp";
                 if (s.Inst.IsSaved) tab.SavedId = s.Inst.Saved.Id;
                 else { tab.InstanceId = s.Inst.Id; tab.Region = s.Inst.Region; }
             }
@@ -2109,7 +2238,7 @@ internal sealed class MainForm : Form
             Log.Write($"Restore: {tab.Name} wasn't reopened (the server or connection no longer exists)");
             return null;
         }
-        var protocol = tab.Kind == "ssh" ? Protocol.Ssh : Protocol.Rdp;
+        var protocol = tab.Kind == "ssh" ? Protocol.Ssh : tab.Kind == "vnc" ? Protocol.Vnc : Protocol.Rdp;
         await ConnectAsync(inst, protocol, tab.AsUser, "", tab.Kind == "ssh" ? SessionRestore.ReadScrollback(tab) : null);
         var s = _sessions.LastOrDefault(x => x.Inst.Id == inst.Id && x.Kind == protocol && x.AsUser == tab.AsUser);
         if (s != null && tab.Docked && s.Term != null && !s.Docked) DockSession(s);
@@ -2119,8 +2248,9 @@ internal sealed class MainForm : Form
     /// <summary>A remote tab that waits for a click: Reconnect opens it (as a new tab); × closes it.</summary>
     private TabPage AddPlaceholder(TabState tab)
     {
-        string title = tab.Name + (tab.Kind == "ssh" ? " · SSH" : "") + (tab.AsUser != null ? $" ({tab.AsUser})" : "");
-        string badge = tab.IsAws ? "AWS" : tab.Kind == "ssh" ? "SSH" : "RDP";
+        // the protocol after the name only for AWS tabs, whose badge says AWS (a saved connection's badge shows it)
+        string title = tab.Name + (tab.IsAws ? (tab.Kind == "ssh" ? " · SSH" : tab.Kind == "vnc" ? " · VNC" : "") : "") + (tab.AsUser != null ? $" ({tab.AsUser})" : "");
+        string badge = tab.IsAws ? "AWS" : tab.Kind == "ssh" ? "SSH" : tab.Kind == "vnc" ? "VNC" : "RDP";
         var page = new TabPage(_tabs.BadgeRoom(badge) + title) { BackColor = Theme.Current.Back, Tag = ThemedTabControl.BadgeTag(badge) };
         var label = new Label
         {
@@ -2495,7 +2625,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        var page = new TabPage(Badged(inst, Protocol.Ssh, inst.Name + " · SSH" + (asUser == null ? "" : $" ({asUser})")))
+        var page = new TabPage(Badged(inst, Protocol.Ssh, inst.Name + ProtocolSuffix(inst, Protocol.Ssh) + (asUser == null ? "" : $" ({asUser})")))
             { BackColor = Theme.Current.Back, Tag = ThemedTabControl.BadgeTag(BadgeFor(inst, Protocol.Ssh)) };
         var term = new TerminalHost { Dock = DockStyle.Fill };
         term.AppShortcut += key => OnAppShortcut(key, _sessions.FirstOrDefault(x => x.Term == term));
@@ -2524,7 +2654,7 @@ internal sealed class MainForm : Form
         }
         term.SessionEnded += _ =>
         {
-            page.Text = Badged(inst, Protocol.Ssh, inst.Name + " · SSH (ended)");
+            page.Text = Badged(inst, Protocol.Ssh, inst.Name + ProtocolSuffix(inst, Protocol.Ssh) + " (ended)");
             session.Tunnel?.Dispose();   // nothing is using it any more
             session.Tunnel = null;
         };
@@ -2557,7 +2687,7 @@ internal sealed class MainForm : Form
         if (reconnect)
         {
             term.Reset();
-            s.Page.Text = Badged(inst, Protocol.Ssh, inst.Name + " · SSH" + (s.AsUser == null ? "" : $" ({s.AsUser})"));
+            s.Page.Text = Badged(inst, Protocol.Ssh, inst.Name + ProtocolSuffix(inst, Protocol.Ssh) + (s.AsUser == null ? "" : $" ({s.AsUser})"));
         }
 
         if (!inst.IsSaved)
@@ -2860,6 +2990,7 @@ internal sealed class MainForm : Form
         try { s.Rdp?.SafeDisconnect(); } catch { }
         try { s.Term?.Dispose(); } catch { }  // ends ssh
         try { s.Web?.Dispose(); } catch { }
+        try { s.Vnc?.Dispose(); } catch { }
         if (s.Inst?.Saved != null) _adHocPasswords.Remove(s.Inst.Saved.Id);
         try { (s.Docked ? _dockTabs : _tabs).TabPages.Remove(s.Page); } catch { }
         try { s.Page.Dispose(); } catch { }
@@ -3338,7 +3469,7 @@ internal sealed class MainForm : Form
 
         foreach (var x in new ToolStripItem[] { _miConnect, _btnConnect, _smConnect }) x.Enabled = canConnect;
         // AWS servers can use either; a saved connection has its own protocol
-        foreach (var x in new ToolStripItem[] { _miConnectSsh, _smConnectSsh, _miConnectRdp, _smConnectRdp })
+        foreach (var x in new ToolStripItem[] { _miConnectSsh, _smConnectSsh, _miConnectRdp, _smConnectRdp, _miConnectVnc })
             x.Enabled = canConnect && i is { IsSaved: false } && i.Online;
         foreach (var x in new ToolStripItem[] { _miStart, _btnStart, _smStart }) x.Enabled = canStart;
         foreach (var x in new ToolStripItem[] { _miStop, _btnStop, _smStop, _miReboot, _btnReboot, _smReboot }) x.Enabled = canStopOrReboot;

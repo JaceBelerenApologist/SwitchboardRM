@@ -3,6 +3,22 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.20.0 (2026-12-07)
+
+- VNC in tabs. Saved connections can be VNC (default port 5900), and AWS servers have Connect with VNC on their
+  right-click menu, through a Session Manager tunnel like the rest. The remote screen fits the tab; its password (and
+  a user name for servers that ask for one) is asked for when it connects, and can be saved in Windows Credential
+  Manager. Text copied on the remote machine lands on this PC's clipboard; the tab menu's Send clipboard text puts
+  this PC's clipboard text on the remote one. Send Ctrl+Alt+Del, Reconnect, the VNC / AWS badge and restoring tabs
+  work as for Remote Desktop. Built on noVNC (MPL 2.0), included in the app; it talks to the VNC server through a
+  relay inside Switchboard that only this PC can use.
+- Tab badges have their own fixed colours, no longer the accent colour: RDP in magenta, SSH in pink and VNC in teal,
+  alongside AWS in orange. Saved SSH and VNC tabs no longer repeat "· SSH" / "· VNC"
+  after the name, since their badge says it; AWS tabs keep it, as their badge says AWS whatever the protocol.
+- Fixed: a server tooltip could stay on screen, on top of other windows and other apps, when a dialog opened (adding
+  a connection, Manage server ...) or another app came forward while it was showing. It now hides whenever
+  Switchboard's main window stops being the active one, and as soon as the cursor leaves the list.
+
 ## 3.19.1 (2026-12-06)
 
 - Release notes look the part: the update notice's What's new and Settings > About > What's new show a header, each

@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace SwitchboardRM;
@@ -23,7 +24,20 @@ internal sealed class HoverTip : IDisposable
     private readonly Func<ListViewItem, TipContent> _content;
     private readonly TipWindow _window = new();
     private readonly System.Windows.Forms.Timer _delay = new() { Interval = 450 };
+    // while the tip shows: hide it if the cursor has left the list or Switchboard isn't the active app any more
+    private readonly System.Windows.Forms.Timer _watch = new() { Interval = 250 };
     private ListViewItem _hovered;
+    private Form _form;
+    private Point _lastMove = new(-1, -1);
+
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+
+    /// <summary>Switchboard's main window (or the tip itself) is the one in front.</summary>
+    private bool AppInFront()
+    {
+        var fg = GetForegroundWindow();
+        return _form != null && _form.IsHandleCreated && (fg == _form.Handle || fg == _window.WindowHandle);
+    }
 
     public HoverTip(ListView list, Func<ListViewItem, TipContent> content = null)
     {
@@ -37,14 +51,47 @@ internal sealed class HoverTip : IDisposable
         _list.KeyDown += (_, _) => Hide();
         _list.Leave += (_, _) => Hide();
         _delay.Tick += (_, _) => { _delay.Stop(); Show(); };
+        _watch.Tick += (_, _) =>
+        {
+            bool overList = _list.IsHandleCreated && _list.Visible &&
+                            _list.RectangleToScreen(_list.ClientRectangle).Contains(Cursor.Position);
+            if (!overList || !AppInFront()) Hide();
+        };
+        // a dialog opening, another app coming forward, minimizing or going to the tray: the main window stops being
+        // the active one, and the tip goes (it's always-on-top, so it would otherwise stay over everything)
+        _list.HandleCreated += (_, _) => WatchForm();
+        _list.ParentChanged += (_, _) => WatchForm();
+        _list.VisibleChanged += (_, _) => { if (!_list.Visible) Hide(); };
+        WatchForm();
+    }
+
+    private void WatchForm()
+    {
+        var form = _list.FindForm();
+        if (form == null || form == _form) return;
+        if (_form != null) { _form.Deactivate -= OnFormDeactivate; _form.Resize -= OnFormDeactivate; }
+        _form = form;
+        _form.Deactivate += OnFormDeactivate;
+        _form.Resize += OnFormDeactivate;   // minimized or hidden to the tray
+    }
+
+    private void OnFormDeactivate(object sender, EventArgs e)
+    {
+        // still in front (a resize, or the tip itself): nothing to do
+        if (_form is { WindowState: not FormWindowState.Minimized, Visible: true } && AppInFront()) return;
+        Hide();
     }
 
     private void Track(Point location)
     {
+        // Windows sends a mouse-move when a window appears or disappears under the cursor, even without movement:
+        // ignore those, or a tip that hides would bring itself straight back
+        if (location == _lastMove) return;
+        _lastMove = location;
         var item = _list.GetItemAt(location.X, location.Y);
         if (item == _hovered) return;
         _hovered = item;
-        _window.Hide();
+        _window.HideTip();
         _delay.Stop();
         if (item != null) _delay.Start();
     }
@@ -59,19 +106,23 @@ internal sealed class HoverTip : IDisposable
             if (string.IsNullOrEmpty(_hovered.ToolTipText)) return;
             content = new TipContent { Note = _hovered.ToolTipText };
         }
+        if (!AppInFront()) return;   // not while a dialog or another app is in front
         _window.Present(content, Cursor.Position);
+        _watch.Start();
     }
 
     public void Hide()
     {
         _delay.Stop();
+        _watch.Stop();
         _hovered = null;
-        _window.Hide();
+        _window.HideTip();
     }
 
     public void Dispose()
     {
         _delay.Dispose();
+        _watch.Dispose();
         _window.Dispose();
     }
 
@@ -95,12 +146,39 @@ internal sealed class HoverTip : IDisposable
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
-            TopMost = true;
+            // not TopMost = true: WinForms applies that in a way that can activate the window (which hid it again, in a
+            // loop). Always-on-top comes from WS_EX_TOPMOST and SetWindowPos with SWP_NOACTIVATE instead.
             Opacity = 0.97;   // a layered window: together with WS_EX_TRANSPARENT, clicks and the mouse pass straight through
             DoubleBuffered = true;
         }
 
         protected override bool ShowWithoutActivation => true;
+
+        private const int SW_HIDE = 0, SW_SHOWNOACTIVATE = 4;
+        private const uint SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40;
+        private static readonly IntPtr HWND_TOPMOST = new(-1);
+        [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int cmd);
+        [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+        private bool _shown;
+
+        /// <summary>The tip's window handle, or zero before it's created (for the foreground check).</summary>
+        public IntPtr WindowHandle => IsHandleCreated ? Handle : IntPtr.Zero;
+
+        /// <summary>Show at these bounds, on top, without activating (never takes the focus from the main window).</summary>
+        private void ShowTip(Rectangle bounds)
+        {
+            SetWindowPos(Handle, HWND_TOPMOST, bounds.X, bounds.Y, bounds.Width, bounds.Height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            if (!_shown) ShowWindow(Handle, SW_SHOWNOACTIVATE);
+            _shown = true;
+            Invalidate();
+        }
+
+        public void HideTip()
+        {
+            if (!_shown || !IsHandleCreated) return;
+            ShowWindow(Handle, SW_HIDE);
+            _shown = false;
+        }
 
         protected override CreateParams CreateParams
         {
@@ -149,10 +227,8 @@ internal sealed class HoverTip : IDisposable
             int x = cursor.X + LogicalToDeviceUnits(14), y = cursor.Y + LogicalToDeviceUnits(20);
             if (x + size.Width > screen.Right) x = Math.Max(screen.Left, cursor.X - size.Width - LogicalToDeviceUnits(8));
             if (y + size.Height > screen.Bottom) y = Math.Max(screen.Top, cursor.Y - size.Height - LogicalToDeviceUnits(8));
-            Bounds = new Rectangle(x, y, size.Width, size.Height);
             BackColor = Theme.Current.Raised;
-            Invalidate();
-            if (!Visible) Show();
+            ShowTip(new Rectangle(x, y, size.Width, size.Height));
         }
 
         protected override void OnPaint(PaintEventArgs e)

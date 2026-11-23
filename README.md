@@ -24,7 +24,8 @@ can reach it, without opening the AWS console.
 ## Features
 
 **Connecting**
-- Remote Desktop and SSH in tabs. Windows servers open in Remote Desktop, Linux in an embedded SSH terminal.
+- Remote Desktop, SSH and VNC in tabs. Windows servers open in Remote Desktop, Linux in an embedded SSH terminal;
+  VNC (screen sharing) for saved connections, and for AWS servers from their right-click menu.
 - AWS servers through Session Manager; any other machine directly (saved connections, or a one-off "connect to a
   computer"). Import connections from RDCMan, mRemoteNG, `.rdp` files and PuTTY.
 - **Connect as**: another user for one connection, in a tab of its own.
@@ -152,7 +153,7 @@ Then click **Sign in**.
 | Ctrl+, | Settings |
 | Ctrl+Alt+End | Ctrl+Alt+Del inside a Remote Desktop session |
 
-- **Right-click a server** for Connect, Connect as, Manage server, Port forwarding, New server like this one,
+- **Right-click a server** for Connect (and Connect with SSH / Remote Desktop / VNC), Connect as, Manage server, Port forwarding, New server like this one,
   Start / Stop / Reboot (on every selected server) and Terminate.
 - **Right-click a tab** for Reconnect, Send Ctrl+Alt+Del, Move left / right, Dock to bottom and Close.
 - **In terminals:** select text (or Ctrl+Shift+C) to copy, Ctrl+V or right-click to paste. When a session ends,
@@ -229,6 +230,7 @@ Settings > About > What's new.
 | [AWS SDK for .NET](https://github.com/aws/aws-sdk-net) | Apache 2.0 | AWS calls (NuGet) |
 | [Microsoft.Web.WebView2](https://www.nuget.org/packages/Microsoft.Web.WebView2) | see package | sign-in window, terminals, claude.ai (NuGet) |
 | [xterm.js](https://github.com/xtermjs/xterm.js) 5.5.0 + fit add-on 0.10.0 | MIT | terminals (in `Assets\terminal\`) |
+| [noVNC](https://github.com/novnc/noVNC) 1.5.0 (with pako) | MPL 2.0 (pako: MIT) | VNC tabs (in `Assets\vnc\novnc\`, built into the app) |
 | [Microsoft ConPTY](https://github.com/microsoft/terminal) | MIT | terminals, so Windows sign-in windows appear (bundled) |
 | [Session Manager plugin](https://github.com/aws/session-manager-plugin) | Apache 2.0 | tunnels (bundled) |
 | [AWS CLI v2](https://github.com/aws/aws-cli) | Apache 2.0 | SSO sign-in, and `aws` in Switchboard's shells (bundled) |

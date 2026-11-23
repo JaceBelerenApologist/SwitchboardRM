@@ -11,7 +11,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <!-- Version: bump this for each release (PATCH = fixes, MINOR = features, MAJOR = breaking changes)
          and add a section to CHANGELOG.md. Shown on Settings > About and in the .exe's Properties > Details. -->
-    <Version>3.19.1</Version>
+    <Version>3.20.0</Version>
     <Product>Switchboard Remote Manager</Product>
     <Copyright>© 2026 Nick Morrissey</Copyright>
     <Description>Switchboard Remote Manager</Description>
@@ -33,6 +33,9 @@
     <EmbeddedResource Include="Assets\terminal\xterm.js" LogicalName="SwitchboardRM.terminal.xterm.js" />
     <EmbeddedResource Include="Assets\terminal\xterm.css" LogicalName="SwitchboardRM.terminal.xterm.css" />
     <EmbeddedResource Include="Assets\terminal\addon-fit.js" LogicalName="SwitchboardRM.terminal.addon-fit.js" />
+    <!-- VNC tabs: Switchboard's page plus noVNC 1.5.0 (MPL 2.0, see Assets\vnc\novnc\LICENSE.txt), served from the .exe;
+         names keep the folders: SwitchboardRM.vnc\novnc\core\rfb.js -->
+    <EmbeddedResource Include="Assets\vnc\**\*" LogicalName="SwitchboardRM.vnc\%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
   <!--

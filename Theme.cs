@@ -1102,9 +1102,15 @@ internal sealed class ThemedTabControl : TabControl
                 string badge = tag[BadgeTagPrefix.Length..];
                 int w = BadgeWidth(badge);
                 var pill = new Rectangle(textRect.Left, textRect.Top + (textRect.Height - BadgeHeight) / 2 + 1, w, BadgeHeight);
-                bool aws = badge == "AWS";
-                var fill = aws ? Color.FromArgb(0xFF, 0x99, 0x00) : p.Accent;
-                var fore = aws ? Color.FromArgb(0x23, 0x2F, 0x3E) : p.AccentText;
+                // fixed colours: AWS in AWS's orange, RDP in magenta (#944792), SSH in pink (#D675C2), VNC in teal
+                var (fill, fore) = badge switch
+                {
+                    "AWS" => (Color.FromArgb(0xFF, 0x99, 0x00), Color.FromArgb(0x23, 0x2F, 0x3E)),
+                    "RDP" => (Color.FromArgb(0x5B, 0x5E, 0xC5), Color.White),
+                    "SSH" => (Color.FromArgb(0x94, 0x47, 0x92), Color.White),
+                    "VNC" => (Color.FromArgb(0x14, 0xB8, 0xA6), Color.FromArgb(0x10, 0x2A, 0x27)),
+                    _ => (p.Accent, p.AccentText),
+                };
                 if (!sel) { fill = Blend(fill, p.Back, 0.35); fore = Blend(fore, fill, 0.15); }
                 var oldMode = g.SmoothingMode;
                 g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;

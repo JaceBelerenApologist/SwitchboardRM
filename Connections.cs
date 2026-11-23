@@ -6,12 +6,12 @@ using System.Windows.Forms;
 namespace SwitchboardRM;
 
 /// <summary>How to connect: Remote Desktop, or an SSH terminal.</summary>
-internal enum Protocol { Rdp, Ssh, Local }   // Local = a shell on this PC (Command Prompt, PowerShell, ...)
+internal enum Protocol { Rdp, Ssh, Local, Vnc }   // Local = a shell on this PC (Command Prompt, PowerShell, ...)
 
 /// <summary>A plain Remote Desktop or SSH connection (no AWS), saved by the user.</summary>
 internal sealed class SavedConnection
 {
-    /// <summary>"RDP" or "SSH". Files from before SSH support have no value here and mean RDP.</summary>
+    /// <summary>"RDP", "SSH" or "VNC". Files from before SSH support have no value here and mean RDP.</summary>
     public string Protocol { get; set; } = "RDP";
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "";
@@ -25,8 +25,9 @@ internal sealed class SavedConnection
     public string Description { get; set; } = "";
 
     public bool IsSsh => string.Equals(Protocol, "SSH", StringComparison.OrdinalIgnoreCase);
-    public int DefaultPort => IsSsh ? 22 : 3389;
-    public SwitchboardRM.Protocol Kind => IsSsh ? SwitchboardRM.Protocol.Ssh : SwitchboardRM.Protocol.Rdp;
+    public bool IsVnc => string.Equals(Protocol, "VNC", StringComparison.OrdinalIgnoreCase);
+    public int DefaultPort => IsSsh ? 22 : IsVnc ? 5900 : 3389;
+    public SwitchboardRM.Protocol Kind => IsSsh ? SwitchboardRM.Protocol.Ssh : IsVnc ? SwitchboardRM.Protocol.Vnc : SwitchboardRM.Protocol.Rdp;
 
     /// <summary>"server" or "server:3390" (port only when it isn't the protocol's usual one).</summary>
     public string Address => Port == DefaultPort ? Host : $"{Host}:{Port}";
@@ -68,10 +69,10 @@ internal static class ConnectionStore
     {
         Name = string.IsNullOrWhiteSpace(c.Name) ? c.Host : c.Name,
         Id = "saved:" + c.Id,
-        Type = c.IsSsh ? "Saved SSH" : "Saved RDP",
+        Type = c.IsSsh ? "Saved SSH" : c.IsVnc ? "Saved VNC" : "Saved RDP",
         Region = "Saved",
         Ip = c.Address,
-        Platform = c.IsSsh ? "Linux" : "Windows",
+        Platform = c.IsSsh ? "Linux" : c.IsVnc ? "VNC" : "Windows",
         Ping = reachable switch { true => "Online", false => "Unreachable", _ => "" },
         Saved = c,
     };
@@ -122,11 +123,11 @@ internal sealed class ConnectionForm : Form
         Text = "A password typed here is saved in Windows Credential Manager for that user, " +
                "the same as Settings > RDP credentials.",
     };
+    private const string _sshNote = "SSH uses your keys (~/.ssh, the SSH agent, or the key file in Settings > SSH). " +
+                                    "If the server wants a password, ssh asks for it in the terminal.";
     private readonly Label _lblSshNote = new()
     {
-        AutoSize = true, MaximumSize = new Size(340, 0), Tag = "muted", Margin = new Padding(0, 6, 0, 0),
-        Text = "SSH uses your keys (~/.ssh, the SSH agent, or the key file in Settings > SSH). " +
-               "If the server wants a password, ssh asks for it in the terminal.",
+        AutoSize = true, MaximumSize = new Size(340, 0), Tag = "muted", Margin = new Padding(0, 6, 0, 0), Text = _sshNote,
     };
     private readonly TextBox _txtName = new() { Width = 340 };
     private readonly TextBox _txtGroup = new() { Width = 340, PlaceholderText = "Optional, e.g. Datacenter / SQL" };
@@ -159,8 +160,8 @@ internal sealed class ConnectionForm : Form
         AutoSize = true;
         AutoSizeMode = AutoSizeMode.GrowAndShrink;
 
-        _cboProtocol.Items.AddRange(new object[] { "Remote Desktop (RDP)", "SSH terminal" });
-        _cboProtocol.SelectedIndex = editing is { IsSsh: true } ? 1 : 0;
+        _cboProtocol.Items.AddRange(new object[] { "Remote Desktop (RDP)", "SSH terminal", "VNC (screen sharing)" });
+        _cboProtocol.SelectedIndex = editing is { IsSsh: true } ? 1 : editing is { IsVnc: true } ? 2 : 0;
         _cboProtocol.SelectedIndexChanged += (_, _) => UpdateProtocol();
         _txtAddress.PlaceholderText = "server.domain.local, 10.0.0.5 or host:3390";
         _txtName.PlaceholderText = "Optional; the computer name is used if blank";
@@ -239,6 +240,7 @@ internal sealed class ConnectionForm : Form
     }
 
     private bool Ssh => _cboProtocol.SelectedIndex == 1;
+    private bool Vnc => _cboProtocol.SelectedIndex == 2;
 
     private void UpdatePassNote()
     {
@@ -251,18 +253,24 @@ internal sealed class ConnectionForm : Form
     /// <summary>SSH doesn't take a password from here (ssh asks in the terminal), so swap the password field for a note.</summary>
     private void UpdateProtocol()
     {
-        _lblPass.Visible = _txtPass.Visible = _lblPassNote.Visible = !Ssh;
-        _lblSshNote.Visible = Ssh;
-        _txtAddress.PlaceholderText = Ssh ? "server.domain.local, 10.0.0.5 or host:2222" : "server.domain.local, 10.0.0.5 or host:3390";
-        _txtUser.PlaceholderText = Ssh
-            ? "Optional; your Windows user name if blank"
+        // SSH asks in the terminal, and VNC asks in its tab (and can save it there): neither takes a password here
+        _lblPass.Visible = _txtPass.Visible = _lblPassNote.Visible = !Ssh && !Vnc;
+        _lblSshNote.Visible = Ssh || Vnc;
+        _lblSshNote.Text = Vnc
+            ? "VNC asks for its password when it connects, and can save it in Windows Credential Manager. The user name is only for servers that ask for one."
+            : _sshNote;
+        _txtAddress.PlaceholderText = Ssh ? "server.domain.local, 10.0.0.5 or host:2222"
+                                    : Vnc ? "server.domain.local, 10.0.0.5 or host:5901"
+                                    : "server.domain.local, 10.0.0.5 or host:3390";
+        _txtUser.PlaceholderText = Ssh ? "Optional; your Windows user name if blank"
+            : Vnc ? "Optional; only for servers that ask for a user name"
             : _defaultUser.Length > 0 ? $"Default: {_defaultUser}" : "Optional; Remote Desktop asks if blank";
-        if (Ssh) _txtPass.Text = "";
+        if (Ssh || Vnc) _txtPass.Text = "";
     }
 
     private void TrySave()
     {
-        var (host, port) = ConnectionStore.ParseAddress(_txtAddress.Text, Ssh ? 22 : 3389);
+        var (host, port) = ConnectionStore.ParseAddress(_txtAddress.Text, Ssh ? 22 : Vnc ? 5900 : 3389);
         if (host.Length == 0)
         {
             _lblError.Text = "Type the computer's name or IP address.";
@@ -278,7 +286,7 @@ internal sealed class ConnectionForm : Form
 
         Result = new SavedConnection
         {
-            Protocol = Ssh ? "SSH" : "RDP",
+            Protocol = Ssh ? "SSH" : Vnc ? "VNC" : "RDP",
             Id = _editing?.Id ?? Guid.NewGuid().ToString("N"),
             Name = _txtName.Text.Trim(),
             Host = host,

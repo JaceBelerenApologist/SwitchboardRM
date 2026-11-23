@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- Switchboard's VNC tab: noVNC 1.5.0 (MPL 2.0, see novnc/LICENSE.txt) connected through Switchboard's local relay -->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg, #202124); color: var(--fg, #d0d0d6);
+               font-family: "Segoe UI", sans-serif; }
+  #screen { position: absolute; inset: 0; }
+  #msg { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+         gap: 16px; font-size: 14px; background: var(--bg, #202124); }
+  #msg.hidden { display: none; }
+  #text { max-width: 520px; text-align: center; line-height: 1.5; }
+  button { font: inherit; padding: 7px 22px; border-radius: 6px; border: 0; cursor: pointer;
+           background: var(--accent, #7c5cff); color: var(--accent-fg, #fff); }
+</style>
+</head>
+<body>
+<div id="screen"></div>
+<div id="msg"><div id="text">Connecting ...</div><button id="again" style="display:none">Reconnect</button></div>
+<script type="module">
+import RFB from './novnc/core/rfb.js';
+
+const q = new URLSearchParams(location.search);
+for (const [name, key] of [['--bg', 'bg'], ['--fg', 'fg'], ['--accent', 'accent'], ['--accent-fg', 'accentfg']])
+  if (q.get(key)) document.documentElement.style.setProperty(name, q.get(key));
+
+const host = window.chrome.webview;
+const send = m => host.postMessage(m);
+const msg = document.getElementById('msg'), text = document.getElementById('text'), again = document.getElementById('again');
+const show = (t, retry) => { text.textContent = t; again.style.display = retry ? '' : 'none'; msg.classList.remove('hidden'); };
+again.onclick = () => { show('Connecting ...', false); send({ t: 'reconnect' }); };
+
+let rfb = null;
+try {
+  rfb = new RFB(document.getElementById('screen'), `ws://127.0.0.1:${q.get('port')}/${q.get('token')}`, { wsProtocols: ['binary'] });
+  rfb.scaleViewport = true;     // the remote screen fits the tab
+  rfb.resizeSession = false;
+  rfb.background = getComputedStyle(document.documentElement).getPropertyValue('--bg') || '#202124';
+  rfb.addEventListener('connect', () => { msg.classList.add('hidden'); rfb.focus(); send({ t: 'connected' }); });
+  rfb.addEventListener('disconnect', e => {
+    const clean = !!(e.detail && e.detail.clean);
+    show(clean ? 'The VNC session ended.' : 'The connection to the VNC server was lost.', true);
+    send({ t: 'disconnected', clean });
+  });
+  rfb.addEventListener('credentialsrequired', e => {
+    const types = (e.detail && e.detail.types) || ['password'];
+    send({ t: 'credentials', user: types.includes('username') });
+  });
+  rfb.addEventListener('securityfailure', e => {
+    const reason = (e.detail && e.detail.reason) || '';
+    send({ t: 'securityfailure', reason });
+    show('The VNC server refused the sign-in' + (reason ? ': ' + reason : '.'), true);
+  });
+  rfb.addEventListener('clipboard', e => send({ t: 'clipboard', text: e.detail.text }));
+} catch (err) {
+  show("Couldn't start VNC: " + err, true);
+}
+
+host.addEventListener('message', e => {
+  const m = e.data;
+  if (!rfb || !m) return;
+  if (m.t === 'credentials') {
+    const creds = { password: m.pass || '' };
+    if (m.user) creds.username = m.user;
+    rfb.sendCredentials(creds);
+  }
+  else if (m.t === 'cad') rfb.sendCtrlAltDel();
+  else if (m.t === 'paste') rfb.clipboardPasteFrom(m.text || '');
+  else if (m.t === 'focus') rfb.focus();
+  else if (m.t === 'close') rfb.disconnect();
+});
+</script>
+</body>
+</html>

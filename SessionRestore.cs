@@ -5,7 +5,7 @@ namespace SwitchboardRM;
 /// <summary>One tab to reopen next time (Settings > Terminal & SSH > Restore my tabs).</summary>
 internal sealed class TabState
 {
-    public string Kind { get; set; } = "";        // "shell", "claude-web", "rdp", "ssh"
+    public string Kind { get; set; } = "";        // "shell", "claude-web", "rdp", "ssh", "vnc"
     public string ShellId { get; set; } = "";     // shell: Shells id, or "claude-code"
     public string InstanceId { get; set; } = "";  // AWS server
     public string Region { get; set; } = "";
@@ -14,7 +14,7 @@ internal sealed class TabState
     public string AsUser { get; set; }            // Connect as (the password is never kept)
     public bool Docked { get; set; }
     public string ScrollbackFile { get; set; } = "";   // file name in the scrollback folder, if output was kept
-    public bool IsRemote => Kind is "rdp" or "ssh";
+    public bool IsRemote => Kind is "rdp" or "ssh" or "vnc";
     public bool IsAws => IsRemote && SavedId.Length == 0;
 }
 
