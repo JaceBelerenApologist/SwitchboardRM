@@ -1122,26 +1122,8 @@ internal sealed class SettingsForm : Form
     /// <summary>The changelog in a small themed reading window.</summary>
     private void ShowChangelog()
     {
-        using var f = new Form
-        {
-            Text = "What's new", Icon = AppIcon.Icon, ShowInTaskbar = false, MinimizeBox = false, MaximizeBox = false,
-            StartPosition = FormStartPosition.CenterParent, ClientSize = new Size(620, 480), Font = Font,
-            KeyPreview = true,
-        };
-        var text = new TextBox
-        {
-            Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill,
-            BorderStyle = BorderStyle.None, Text = AppInfo.Changelog.Replace("\r\n", "\n").Replace("\n", "\r\n"),
-        };
-        var holder = new Panel { Dock = DockStyle.Fill, Padding = new Padding(18, 14, 8, 8) };
-        holder.Controls.Add(text);
-        f.Controls.Add(holder);
-        f.KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) f.Close(); };
-        f.HandleCreated += (_, _) => Theme.ApplyTitleBar(f);
-        Theme.Apply(f, Theme.Current.IsDark);
-        text.BorderStyle = BorderStyle.None;
-        text.BackColor = Theme.Current.Back;
-        f.Shown += (_, _) => { text.SelectionStart = 0; text.SelectionLength = 0; };
+        using var f = new NotesForm("What's new", $"Switchboard {AppInfo.Version}: every version's changes, newest first",
+            AppInfo.Changelog, $"https://github.com/{AppInfo.Repo}/releases");
         f.ShowDialog(this);
     }
 }

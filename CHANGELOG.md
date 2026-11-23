@@ -3,6 +3,12 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.19.1 (2026-12-06)
+
+- Release notes look the part: the update notice's What's new and Settings > About > What's new show a header, each
+  version as a heading with its date, bullets with proper indents, "Fixed:" items tagged FIXED, and bold and code
+  formatted, in the app's theme and font. The update notice's notes have an Update now button.
+
 ## 3.19.0 (2026-12-05)
 
 - Fake bold throughout: with an app font that has no bold style, bold text everywhere (headings in Settings and the

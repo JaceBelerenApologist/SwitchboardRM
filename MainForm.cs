@@ -2338,26 +2338,18 @@ internal sealed class MainForm : Form
         }
     }
 
-    private void ShowReleaseNotes()
+    private async void ShowReleaseNotes()
     {
         if (_update == null) return;
-        using var f = new Form
-        {
-            Text = $"What's new in Switchboard {_update.Version}", Icon = AppIcon.Icon, StartPosition = FormStartPosition.CenterParent,
-            ClientSize = new Size(LogicalToDeviceUnits(640), LogicalToDeviceUnits(440)), MinimizeBox = false, ShowInTaskbar = false,
-        };
         string notes = _update.Notes.Length > 0 ? _update.Notes : "No notes were published with this release.";
-        var text = new TextBox
+        bool updateRequested;
+        using (var f = new NotesForm($"What's new in Switchboard {_update.Version}", $"You have {AppInfo.Version}", notes,
+                   _update.PageUrl, offerUpdate: true))
         {
-            Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BorderStyle = BorderStyle.None,
-            Text = notes.Replace("\r\n", "\n").Replace("\n", "\r\n"), Font = _menu.Font,
-        };
-        var page = new LinkLabel { Text = "Open the release page", Dock = DockStyle.Bottom, Height = LogicalToDeviceUnits(30), Padding = new Padding(8, 6, 0, 0) };
-        page.LinkClicked += (_, _) => OpenInBrowser(_update.PageUrl);
-        f.Controls.Add(text);
-        f.Controls.Add(page);
-        Theme.Apply(f, Theme.Current.IsDark);
-        f.ShowDialog(this);
+            f.ShowDialog(this);
+            updateRequested = f.UpdateRequested;
+        }
+        if (updateRequested) await UpdateNowAsync();
     }
 
     /// <summary>
