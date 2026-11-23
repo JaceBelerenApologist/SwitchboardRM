@@ -36,12 +36,14 @@ internal sealed class NewServerForm : Form
     // ---- screens and navigation
     private readonly Panel _host = new() { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(20, 12, 20, 12) };
     private readonly FlowLayoutPanel[] _pages = new FlowLayoutPanel[4];
-    private readonly Label _steps = new() { Dock = DockStyle.Top, Height = 36, Padding = new Padding(20, 12, 20, 0), UseMnemonic = false };
+    // the steps down the left, like Settings and the Server window
+    private readonly FlowLayoutPanel _nav = new() { Dock = DockStyle.Left, Width = 200, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(12, 14, 8, 8) };
+    private readonly List<Button> _stepButtons = new();
     private readonly Label _status = new() { Dock = DockStyle.Bottom, Height = 40, Padding = new Padding(20, 6, 20, 0), UseMnemonic = false };
     private readonly Button _back = new() { Text = "< Back", AutoSize = true, MinimumSize = new Size(96, 32), Margin = new Padding(0, 0, 8, 0) };
     private readonly Button _next = new() { Text = "Next >", Tag = "primary", AutoSize = true, MinimumSize = new Size(120, 32), Margin = new Padding(0, 0, 8, 0) };
     private int _page;
-    private static readonly string[] StepNames = { "1  Server", "2  Network", "3  Access and protection", "4  Review" };
+    private static readonly string[] StepNames = { "1   Server", "2   Network", "3   Access and protection", "4   Review" };
 
     // ---- 1. server
     private readonly ComboBox _region = new() { Width = 200, DropDownStyle = ComboBoxStyle.DropDownList };
@@ -106,8 +108,8 @@ internal sealed class NewServerForm : Form
         MinimizeBox = false;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterParent;
-        ClientSize = new Size(LogicalToDeviceUnits(920), LogicalToDeviceUnits(700));
-        MinimumSize = new Size(LogicalToDeviceUnits(760), LogicalToDeviceUnits(520));
+        ClientSize = new Size(LogicalToDeviceUnits(1110), LogicalToDeviceUnits(700));
+        MinimumSize = new Size(LogicalToDeviceUnits(950), LogicalToDeviceUnits(520));
 
         foreach (var r in regions.Concat(clone != null ? new[] { clone.Region } : Array.Empty<string>()).Where(r => !string.IsNullOrEmpty(r)).Distinct())
             _region.Items.Add(r);
@@ -140,10 +142,23 @@ internal sealed class NewServerForm : Form
         CancelButton = cancel;
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, Height = 52, Padding = new Padding(16, 8, 16, 8) };
         buttons.Controls.AddRange(new Control[] { cancel, _next, _back });
+        for (int i = 0; i < StepNames.Length; i++)
+        {
+            int step = i;
+            var b = new Button
+            {
+                Text = StepNames[i], Width = 176, Height = 34, TextAlign = ContentAlignment.MiddleLeft, FlatStyle = FlatStyle.Flat,
+                Margin = new Padding(0, 0, 0, 4), Padding = new Padding(8, 0, 0, 0),
+            };
+            b.FlatAppearance.BorderSize = 0;
+            b.Click += async (_, _) => await GoToAsync(step);
+            _stepButtons.Add(b);
+            _nav.Controls.Add(b);
+        }
         Controls.Add(_host);
+        Controls.Add(_nav);
         Controls.Add(_status);
         Controls.Add(buttons);
-        Controls.Add(_steps);
 
         _back.Click += (_, _) => ShowPage(_page - 1);
         _next.Click += async (_, _) => await NextAsync();
@@ -253,12 +268,43 @@ internal sealed class NewServerForm : Form
         _host.AutoScrollPosition = new Point(0, 0);
         _back.Enabled = _page > 0;
         _next.Text = _page == _pages.Length - 1 ? "Launch" : "Next >";
-        _steps.Text = string.Join("      ", StepNames.Select((s, i) => i == _page ? "[ " + s + " ]" : s));
+        for (int i = 0; i < _stepButtons.Count; i++)
+        {
+            // the current step highlighted and bold, after the theme (which would reset them)
+            var b = _stepButtons[i];
+            b.BackColor = i == _page ? Theme.Current.Hover : Theme.Current.Back;
+            b.ForeColor = i <= _page ? Theme.Current.Text : Theme.Current.Muted;
+            b.Font = Theme.CreateFont(Theme.UiFont, Font.Size, i == _page ? FontStyle.Bold : FontStyle.Regular);
+        }
         if (_page == 3) _review.Text = ReviewText();
         Status("");
     }
 
     /// <summary>Next: check this screen first (the network screen's addresses with AWS), or Launch on the review.</summary>
+    /// <summary>
+    /// A step in the left column: earlier steps open straight away; later ones go forward a screen at a time through
+    /// each screen's checks (stopping at the first problem), so nothing is skipped.
+    /// </summary>
+    private async Task GoToAsync(int step)
+    {
+        if (step == _page) return;
+        if (step < _page) { ShowPage(step); return; }
+        while (_page < step)
+        {
+            int before = _page;
+            if (_page == _pages.Length - 1) return;   // never launches from here
+            string problem = _page switch
+            {
+                0 => CheckServerPage(),
+                1 => await CheckNetworkPageAsync(),
+                _ => null,
+            };
+            if (problem != null) { Status(problem, accent: true); return; }
+            ShowPage(_page + 1);
+            if (_page == before) return;
+        }
+    }
+
     private async Task NextAsync()
     {
         string problem = _page switch

@@ -1247,6 +1247,7 @@ internal sealed class TerminalPreview : Control
             {
                 var f = bold ? boldFont : font;
                 TextRenderer.DrawText(g, text, f, new Point(x, y), C(color), flags);
+                if (Theme.IsFauxBold(f)) TextRenderer.DrawText(g, text, f, new Point(x + 1, y), C(color), flags);   // no bold file: fake it
                 x += TextRenderer.MeasureText(g, text, f, Size.Empty, flags).Width;
             }
             y += lineH;

@@ -2430,7 +2430,7 @@ internal sealed class MainForm : Form
 
         var inst = new Instance { Name = name, Id = "shell:" + Guid.NewGuid().ToString("N"), Type = shell.Id };
         var page = new TabPage(ThemedTabControl.IconSpace + name) { BackColor = Theme.Current.Back, Tag = ThemedTabControl.ShellTag };
-        ThemedTabControl.SetTabIcon(page, ShellIcons.For(shell));   // its program's own icon (cmd, PowerShell, pwsh, Git Bash, WSL ...)
+        ThemedTabControl.SetTabIcon(page, ShellIcons.For(shell, _tabs.LogicalToDeviceUnits(16)));   // its program's own icon, at this screen's scale
         var term = new TerminalHost { Dock = DockStyle.Fill, EndedAction = "restart" };
         term.AppShortcut += key => OnAppShortcut(key, _sessions.FirstOrDefault(x => x.Term == term));
         // Esc on an ended terminal closes its tab (after this key event, since closing destroys the terminal)

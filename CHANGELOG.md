@@ -3,6 +3,18 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.19.0 (2026-12-05)
+
+- Fake bold throughout: with an app font that has no bold style, bold text everywhere (headings in Settings and the
+  dialogs, the Server window's selected page, the New server wizard's titles, the Settings terminal preview) is drawn
+  thicker by hand, as the menus already were, instead of falling back to regular text.
+- The tab strip follows each screen's scaling: the close button, shell icons and AWS / RDP / SSH badges are sized for
+  the screen the window is on, and resize with the tab text when the window moves to a screen with different scaling.
+  On screens scaled above 100% they're now proportionally larger, matching the text, rather than staying at their
+  100% size. Shell icons are read at that size, so they stay crisp.
+- New server: the steps are a column down the left, like Settings and the Server window, with the current step
+  highlighted. Clicking an earlier step goes back to it; a later one goes forward through each screen's checks.
+
 ## 3.18.1 (2026-12-04)
 
 - Fixed: server tooltips didn't follow the cursor down the list. Windows' own list tooltips appear under the cursor and

@@ -341,8 +341,8 @@ commands by `$LASTEXITCODE`, never by stderr (9.1). Parse-check with
     gets `Theme.EnableDpiRescaling` (from `Theme.Apply` / `ApplyTitleBar`): `AutoScaleMode = Dpi` with
     `AutoScaleDimensions = CurrentAutoScaleDimensions`, so it keeps the sizes it was built with on its first screen and
     WinForms rescales it when it moves to another DPI. Size new UI with `LogicalToDeviceUnits` / `DeviceDpi` where it
-    must track the current screen. Owner-drawn constants in `ThemedTabControl` (close ×, badges, 16 px icons) are fixed
-    pixels: they don't follow a DPI change yet.
+    must track the current screen. `ThemedTabControl` sizes its own drawing with `Px(n)` (n pixels at 100%, scaled by
+    `DeviceDpi`), derives the badge font from the tab font, and resets its tab padding in `RescaleConstantsForDpi`.
 25d. **A dropped RDP connection isn't necessarily the end.** `RdpHost.Disconnected` (the control's `OnDisconnected`,
     DISPID 4, plus `ExtendedDisconnectReason`) is recorded on the session; `MainForm.IsDeliberateEnd` closes the tab
     only for reason 1 (this side) or 2 (remote user), or extended 1, 2, 5, 11, 12 (admin disconnect/logoff, replaced,
@@ -357,7 +357,9 @@ commands by `$LASTEXITCODE`, never by stderr (9.1). Parse-check with
     A fonts-folder family often has only a regular file; asking for its bold directly makes Windows substitute some
     other font that has one (it drew the tray menu's bold item in the terminal font). `CreateFont` falls back to the
     family's regular style when the requested one doesn't exist, and records it in `Theme.IsFauxBold`;
-    `ThemedRenderer.OnRenderItemText` then draws menu text twice (+1 px) for a fake bold.
+    `ThemedRenderer.OnRenderItemText` then draws menu text twice (+1 px) for a fake bold; labels and flat buttons get
+    a Paint handler (`Theme.AttachFauxBold`, from `ApplyFont`) that repaints background + text twice when their font is
+    a fake bold (checked at paint time); owner-drawn text (HoverTip, TerminalPreview) does the same itself.
 26a. **Reordering tabs must not remove and re-insert pages:** taking an RDP page out of its TabControl (even
     briefly) drops the connection. `ThemedTabControl.MoveTab` reorders by assigning positions
     (`TabPages[i] = page`, which only relabels the native tab items) in neighbour swaps, then sets `SelectedIndex`.

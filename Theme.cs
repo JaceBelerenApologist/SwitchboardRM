@@ -236,6 +236,66 @@ internal static class Theme
         if (c is AxHost) return;
         var f = UiFontFor(c, c.Font);
         if (f != null && !ReferenceEquals(f, c.Font)) c.Font = f;
+        AttachFauxBold(c);
+    }
+
+    // ---- fake bold for labels and flat buttons (headings, the Server window's selected page ...)
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Control, object> FauxBoldPainted = new();
+
+    /// <summary>
+    /// Labels and flat buttons repaint their own text when their font stands in for a missing bold (checked at paint
+    /// time, so a font set later, like the Server window's selected page, is covered too).
+    /// </summary>
+    private static void AttachFauxBold(Control c)
+    {
+        if (c is not (Label or Button { FlatStyle: FlatStyle.Flat }) || FauxBoldPainted.TryGetValue(c, out _)) return;
+        FauxBoldPainted.Add(c, null);
+        c.Paint += PaintFauxBold;
+    }
+
+    /// <summary>
+    /// The control has already drawn its text; for a fake bold, paint it again ourselves: the background, then the text
+    /// twice, the second a pixel to the right (both passes ours, so they line up exactly).
+    /// </summary>
+    private static void PaintFauxBold(object sender, PaintEventArgs e)
+    {
+        var c = (Control)sender;
+        if (!IsFauxBold(c.Font) || string.IsNullOrEmpty(c.Text)) return;
+        var back = EffectiveBack(c);
+        if (c is Button b && !b.FlatAppearance.MouseOverBackColor.IsEmpty && b.ClientRectangle.Contains(b.PointToClient(Cursor.Position)))
+            back = b.FlatAppearance.MouseOverBackColor;
+        using (var brush = new SolidBrush(back)) e.Graphics.FillRectangle(brush, c.ClientRectangle);
+
+        var align = c is Label l ? l.TextAlign : ((Button)c).TextAlign;
+        bool wraps = c is not Label { AutoSize: true, MaximumSize.Width: 0 };
+        var flags = AlignFlags(align) | (wraps ? TextFormatFlags.WordBreak : TextFormatFlags.SingleLine) |
+                    (c is Label { UseMnemonic: false } ? TextFormatFlags.NoPrefix : TextFormatFlags.HidePrefix);
+        var area = new Rectangle(c.Padding.Left, c.Padding.Top,
+            Math.Max(0, c.ClientSize.Width - c.Padding.Horizontal), Math.Max(0, c.ClientSize.Height - c.Padding.Vertical));
+        var color = c.Enabled ? c.ForeColor : Current.Muted;
+        TextRenderer.DrawText(e.Graphics, c.Text, c.Font, area, color, flags);
+        area.Offset(1, 0);
+        TextRenderer.DrawText(e.Graphics, c.Text, c.Font, area, color, flags);
+    }
+
+    /// <summary>The colour actually behind a control: its own, or the first solid one among its parents.</summary>
+    private static Color EffectiveBack(Control c)
+    {
+        for (var x = c; x != null; x = x.Parent)
+            if (x.BackColor.A == 255) return x.BackColor;
+        return Current.Back;
+    }
+
+    private static TextFormatFlags AlignFlags(ContentAlignment a)
+    {
+        var h = a is ContentAlignment.TopCenter or ContentAlignment.MiddleCenter or ContentAlignment.BottomCenter ? TextFormatFlags.HorizontalCenter
+              : a is ContentAlignment.TopRight or ContentAlignment.MiddleRight or ContentAlignment.BottomRight ? TextFormatFlags.Right
+              : TextFormatFlags.Left;
+        var v = a is ContentAlignment.MiddleLeft or ContentAlignment.MiddleCenter or ContentAlignment.MiddleRight ? TextFormatFlags.VerticalCenter
+              : a is ContentAlignment.BottomLeft or ContentAlignment.BottomCenter or ContentAlignment.BottomRight ? TextFormatFlags.Bottom
+              : TextFormatFlags.Top;
+        return h | v;
     }
 
     /// <summary>Pick the palette without styling a window (used by the splash, which paints itself).</summary>
@@ -780,12 +840,32 @@ internal sealed class ThemedTabControl : TabControl
     /// saved connections). The page's Tag is BadgeTag(badge) and its text starts with BadgeRoom(badge).
     /// </summary>
     public const string BadgeTagPrefix = "badge:";
-    private const int BadgeHeight = 16, BadgeGap = 6;
-    private static readonly Font BadgeFont = new("Segoe UI", 7F, FontStyle.Bold);
     public static string BadgeTag(string badge) => BadgeTagPrefix + badge;
 
-    private static int BadgeWidth(string badge) =>
-        TextRenderer.MeasureText(badge, BadgeFont, Size.Empty, TextFormatFlags.NoPadding).Width + 10;
+    // sizes follow the screen's scaling (per-monitor DPI): pixels at 100%, scaled to the screen the strip is on
+    private int Px(int pixelsAt100) => (int)Math.Round(pixelsAt100 * DeviceDpi / 96.0);
+    private int BadgeHeight => Px(16);
+    private int BadgeGap => Px(6);
+    private int CloseSize => Px(16);
+
+    // the badge text scales with the tab text (which WinForms rescales when the window changes screens)
+    private Font _badgeFont;
+    private Font BadgeFont
+    {
+        get
+        {
+            float size = Font.SizeInPoints * 7f / 9f;
+            if (_badgeFont == null || Math.Abs(_badgeFont.SizeInPoints - size) > 0.01f)
+            {
+                _badgeFont?.Dispose();
+                _badgeFont = new Font("Segoe UI", size, FontStyle.Bold);
+            }
+            return _badgeFont;
+        }
+    }
+
+    private int BadgeWidth(string badge) =>
+        TextRenderer.MeasureText(badge, BadgeFont, Size.Empty, TextFormatFlags.NoPadding).Width + Px(10);
 
     /// <summary>Spaces in front of a tab's text that leave room for its badge, measured in this strip's font.</summary>
     public string BadgeRoom(string badge)
@@ -798,7 +878,6 @@ internal sealed class ThemedTabControl : TabControl
     private static Color Blend(Color a, Color b, double t) =>
         Color.FromArgb((int)(a.R + (b.R - a.R) * t), (int)(a.G + (b.G - a.G) * t), (int)(a.B + (b.B - a.B) * t));
 
-    private const int CloseSize = 16;
     private const int PlusSize = 22;
     private const int WM_LBUTTONDOWN = 0x0201;
     private const int WM_NCHITTEST = 0x0084, HTTRANSPARENT = -1, HTCLIENT = 1;
@@ -816,13 +895,21 @@ internal sealed class ThemedTabControl : TabControl
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
                  ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-        Padding = new Point(22, 6); // room for the × on the right
+        Padding = new Point(Px(22), Px(6)); // room for the × on the right
+    }
+
+    /// <summary>The window moved to a screen with different scaling: the tab padding follows.</summary>
+    protected override void RescaleConstantsForDpi(int deviceDpiOld, int deviceDpiNew)
+    {
+        base.RescaleConstantsForDpi(deviceDpiOld, deviceDpiNew);
+        Padding = new Point((int)Math.Round(22 * deviceDpiNew / 96.0), (int)Math.Round(6 * deviceDpiNew / 96.0));
+        Invalidate();
     }
 
     private Rectangle CloseRect(int i)
     {
         var r = GetTabRect(i);
-        return new Rectangle(r.Right - CloseSize - 7, r.Top + (r.Height - CloseSize) / 2 + 1, CloseSize, CloseSize);
+        return new Rectangle(r.Right - CloseSize - Px(7), r.Top + (r.Height - CloseSize) / 2 + 1, CloseSize, CloseSize);
     }
 
     private int CloseHit(Point pt)
@@ -988,19 +1075,25 @@ internal sealed class ThemedTabControl : TabControl
             {
                 g.DrawLine(border, r.Right - 1, r.Top + 6, r.Right - 1, r.Bottom - 6);
             }
-            var textRect = new Rectangle(r.Left + 12, r.Top, r.Width - 12 - CloseSize - 12, r.Height);
+            var textRect = new Rectangle(r.Left + Px(12), r.Top, r.Width - Px(12) - CloseSize - Px(12), r.Height);
             string text = TabPages[i].Text;
             if (Equals(TabPages[i].Tag, ShellTag))
             {
                 // terminal icon in the space IconSpace made, then the name
-                var iconRect = new Rectangle(textRect.Left, textRect.Top, 18, textRect.Height);
+                var iconRect = new Rectangle(textRect.Left, textRect.Top, Px(18), textRect.Height);
+                int iconSize = Px(16);
                 if (TabIcons.TryGetValue(TabPages[i], out var icon))
-                    g.DrawImage(icon, new Rectangle(iconRect.Left + (iconRect.Width - 16) / 2, iconRect.Top + (iconRect.Height - 16) / 2 + 1, 16, 16));
+                {
+                    var oldMode = g.InterpolationMode;
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    g.DrawImage(icon, new Rectangle(iconRect.Left + (iconRect.Width - iconSize) / 2, iconRect.Top + (iconRect.Height - iconSize) / 2 + 1, iconSize, iconSize));
+                    g.InterpolationMode = oldMode;
+                }
                 else
                     TextRenderer.DrawText(g, Icons.Terminal, Icons.Font, iconRect, sel ? p.AccentFore : p.Muted,
                         TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                 text = text.TrimStart();
-                textRect = new Rectangle(textRect.Left + 22, textRect.Top, Math.Max(0, textRect.Width - 22), textRect.Height);
+                textRect = new Rectangle(textRect.Left + Px(22), textRect.Top, Math.Max(0, textRect.Width - Px(22)), textRect.Height);
             }
             else if (TabPages[i].Tag is string tag && tag.StartsWith(BadgeTagPrefix, StringComparison.Ordinal))
             {
