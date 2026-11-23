@@ -244,6 +244,7 @@ internal sealed class MainForm : Form
     private readonly ThemedCheckBox _chkKeep = new() { Text = "Keep me signed in", AutoSize = true };
     private ToolStripControlHost _keepHost;
     private readonly ToolTip _tips = new();
+    private HoverTip _hoverTip;
     private bool _syncingKeep; // set while the code (not the user) changes the checkbox
     private List<string> _columns = new();               // keys shown, in display order
     private readonly ContextMenuStrip _columnMenu = new();
@@ -463,7 +464,8 @@ internal sealed class MainForm : Form
         _list.MultiSelect = true;   // Start / Stop / Reboot act on every selected AWS server; everything else on the first
         _list.HideSelection = false;
         _list.GridLines = false; // row lines are drawn by ThemedListView
-        _list.ShowItemToolTips = true;
+        // the server tooltips: a formatted card, mouse-transparent so moving down the list keeps working
+        _hoverTip = new HoverTip(_list, item => item.Tag is Instance hovered ? TipFor(hovered) : null);
         _list.AllowColumnReorder = true; // drag headers; Name is kept first (see ColumnReordered)
         _list.Font = new Font("Segoe UI", 10F);
         _savedView = _settings.SavedView;
@@ -1737,10 +1739,20 @@ internal sealed class MainForm : Form
     {
         _tray.Icon = AppIcon.Icon;
         var menu = new ContextMenuStrip();
-        menu.Items.Add(new ToolStripMenuItem("&Open Switchboard", null, (_, _) => RestoreFromTray()) { Font = new Font(menu.Font, FontStyle.Bold) });
+        var open = new ToolStripMenuItem("&Open Switchboard", null, (_, _) => RestoreFromTray());
+        menu.Items.Add(open);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("E&xit", null, (_, _) => ExitApp()));
-        menu.Opening += (_, _) => Theme.ApplyMenu(menu);
+        menu.Opening += (_, _) =>
+        {
+            // the app font, like the menu bar (this menu isn't part of the window, so it doesn't inherit it), with
+            // "Open" the bold version of the same font; set on opening, so a font change in Settings applies at once
+            menu.Font = _menu.Font;
+            // through CreateFont: a fonts-folder font without a bold file falls back to its regular style, instead of
+            // Windows substituting some other font that has a bold
+            open.Font = Theme.CreateFont(Theme.UiFont, _menu.Font.Size, FontStyle.Bold);
+            Theme.ApplyMenu(menu);
+        };
         _tray.ContextMenuStrip = menu;
         _tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) RestoreFromTray(); };
         _tray.BalloonTipClicked += (_, _) => RestoreFromTray();
@@ -3823,6 +3835,47 @@ internal sealed class MainForm : Form
         $"\n{i.Type}  {i.OsFull}\nStatus: {StatusOf(i)}" +
         $"\nEC2 state: {(i.State.Length > 0 ? i.State : "n/a")}   Systems Manager: {(i.Managed ? i.Ping : "not managed")}" +
         (i.Tags.Length > 0 ? "\n" + i.Tags.Replace("; ", "\n") : "");
+
+    /// <summary>A server's tooltip card: name, a one-line summary, then details as label/value rows (status in colour).</summary>
+    private TipContent TipFor(Instance i)
+    {
+        string status = StatusOf(i);
+        var tip = new TipContent { Title = i.Name };
+        if (i.IsSaved)
+        {
+            tip.Subtitle = $"Saved {(i.Saved.IsSsh ? "SSH" : "Remote Desktop")} connection";
+            tip.Rows.Add(("Address", i.Saved.Address, null));
+            tip.Rows.Add(("Status", status, StatusColor(status)));
+            tip.Rows.Add(("Signs in as", CellText(i, "User"), null));
+            tip.Note = i.Saved.Description?.Trim() ?? "";
+            return tip;
+        }
+        tip.Subtitle = string.Join("  ·  ", new[] { i.Type, i.OsFull }.Where(x => !string.IsNullOrWhiteSpace(x)));
+        tip.Rows.Add(("Status", status, StatusColor(status)));
+        tip.Rows.Add(("Instance ID", i.Id, null));
+        if (!string.IsNullOrEmpty(i.Region)) tip.Rows.Add(("Region", i.Region, null));
+        tip.Rows.Add(("EC2 state", i.State.Length > 0 ? i.State : "n/a", StatusColor(i.State)));
+        tip.Rows.Add(("Systems Manager", i.Managed ? i.Ping : "not managed", StatusColor(i.Managed ? i.Ping : "not managed")));
+        foreach (var pair in i.Tags.Split("; ", StringSplitOptions.RemoveEmptyEntries))
+        {
+            int eq = pair.IndexOf('=');
+            if (eq > 0) tip.Tags.Add((pair[..eq], pair[(eq + 1)..]));
+        }
+        return tip;
+    }
+
+    /// <summary>Green for up, amber for changing, red for down; null (normal text) for anything else.</summary>
+    private static Color? StatusColor(string text)
+    {
+        string t = (text ?? "").ToLowerInvariant();
+        var p = Theme.Current;
+        if (t.Contains("unreachable") || t.Contains("offline") || t.Contains("connectionlost") || t.Contains("connection lost") ||
+            t.Contains("not managed") || t.Contains("terminated") || t.Contains("failed")) return p.Bad;
+        if (t.Contains("starting") || t.Contains("stopping") || t.Contains("pending") || t.Contains("rebooting") ||
+            t.Contains("shutting") || t.Contains("checking")) return p.Warn;
+        if (t.Contains("online") || t.Contains("running") || t.Contains("reachable") || t.Contains("ready")) return p.Good;
+        return null;
+    }
 
     private async Task InstanceActionAsync(Instance inst, InstanceActions.Action action,
         bool confirm = true, bool connectWhenReady = false)

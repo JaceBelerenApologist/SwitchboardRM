@@ -3,6 +3,21 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.18.1 (2026-12-04)
+
+- Fixed: server tooltips didn't follow the cursor down the list. Windows' own list tooltips appear under the cursor and
+  took the mouse when it moved onto them, so the list stopped noticing which server was under the cursor. The list now
+  has its own tooltip that the mouse passes straight through, in the app's colours, beside the cursor.
+- Server tooltips are formatted: the server's name as a bold title, its type and OS (or "Saved Remote Desktop
+  connection") beneath, then aligned label / value rows with the status in colour (green up, amber changing, red
+  down), tags under their own heading, and a saved connection's description at the bottom. In the app font.
+- Fixed: the password fields' eye button covered the right edge of the box's border. It now sits just inside it.
+- Fixed: "Open Switchboard" in the system tray icon's menu was drawn in a different font from the rest of the app: at
+  first Windows' default menu font, and with an app font from the fonts folder that has no bold style, whatever other
+  font Windows substituted. It now uses the app font.
+- Bold menu items (the tray's Open Switchboard, Connect on a server's right-click menu) stay bold with an app font
+  that has no bold style: menus draw a fake bold (the text again, a pixel to the right), as browsers do.
+
 ## 3.18.0 (2026-12-03)
 
 - Send Ctrl+Alt+Del on a Remote Desktop tab's right-click menu (while connected): opens the server's security screen

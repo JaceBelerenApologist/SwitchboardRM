@@ -348,6 +348,16 @@ commands by `$LASTEXITCODE`, never by stderr (9.1). Parse-check with
     only for reason 1 (this side) or 2 (remote user), or extended 1, 2, 5, 11, 12 (admin disconnect/logoff, replaced,
     user disconnect/logoff). Everything else goes to `AutoReconnectAsync`: same tab, `Session.Overlay`, new tunnel,
     `StartRdpAsync` on the same control; retries 5 s then 15 s up to 10 min, at once on `NetworkAvailabilityChanged`.
+25e. **Don't use ListView's own item tooltips (`ShowItemToolTips`) for the server list:** the native tip appears under
+    the cursor and captures the mouse when moving down, so hover tracking stops. `HoverTip` is a click-through layered
+    window (`WS_EX_TRANSPARENT` + `HTTRANSPARENT`) driven by the list's MouseMove. It draws a `TipContent` card
+    (title, subtitle, label/value rows with optional colour, tags, note) from `MainForm.TipFor`, falling back to the
+    item's `ToolTipText`.
+25f. **Always make styled fonts with `Theme.CreateFont(family, size, style)`, never `new Font(someFont, FontStyle.Bold)`.**
+    A fonts-folder family often has only a regular file; asking for its bold directly makes Windows substitute some
+    other font that has one (it drew the tray menu's bold item in the terminal font). `CreateFont` falls back to the
+    family's regular style when the requested one doesn't exist, and records it in `Theme.IsFauxBold`;
+    `ThemedRenderer.OnRenderItemText` then draws menu text twice (+1 px) for a fake bold.
 26a. **Reordering tabs must not remove and re-insert pages:** taking an RDP page out of its TabControl (even
     briefly) drops the connection. `ThemedTabControl.MoveTab` reorders by assigning positions
     (`TabPages[i] = page`, which only relabels the native tab items) in neighbour swaps, then sets `SelectedIndex`.

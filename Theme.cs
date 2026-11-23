@@ -212,13 +212,23 @@ internal static class Theme
     {
         if (FontLoader.TryGetFamily(family, out var loaded))
         {
+            bool wantedBold = style.HasFlag(FontStyle.Bold);
             if (!loaded.IsStyleAvailable(style))
                 style = loaded.IsStyleAvailable(FontStyle.Regular) ? FontStyle.Regular
                       : loaded.IsStyleAvailable(FontStyle.Bold) ? FontStyle.Bold : FontStyle.Italic;
-            return new Font(loaded, size, style, unit);
+            var font = new Font(loaded, size, style, unit);
+            // no bold file for this family: remember it was meant to be bold, so menus can draw a fake bold
+            if (wantedBold && !style.HasFlag(FontStyle.Bold)) FauxBold.AddOrUpdate(font, null);
+            return font;
         }
         return new Font(family, size, style, unit);
     }
+
+    // fonts that stand in for a bold the family doesn't have (see CreateFont, ThemedRenderer.OnRenderItemText)
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Font, object> FauxBold = new();
+
+    /// <summary>The font was asked for in bold but its family has no bold style: draw it thicker by hand (fake bold).</summary>
+    public static bool IsFauxBold(Font font) => font != null && FauxBold.TryGetValue(font, out _);
 
     /// <summary>Apply the app font to a control created after the theme was applied.</summary>
     public static void ApplyFont(Control c)
@@ -634,6 +644,14 @@ internal sealed class ThemedRenderer : ToolStripProfessionalRenderer
         else
             e.TextColor = e.Item.Enabled ? _p.Text : _p.Muted;
         base.OnRenderItemText(e);
+        if (Theme.IsFauxBold(e.TextFont))
+        {
+            // a fake bold for a font without one, the way browsers do it: the same text again, a pixel to the right
+            var r = e.TextRectangle;
+            e.TextRectangle = new Rectangle(r.X + 1, r.Y, r.Width, r.Height);
+            base.OnRenderItemText(e);
+            e.TextRectangle = r;
+        }
     }
 
     protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
