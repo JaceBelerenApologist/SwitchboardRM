@@ -327,6 +327,9 @@ commands by `$LASTEXITCODE`, never by stderr (9.1). Parse-check with
     returns `null` for empty lists and many numbers/bools: read through null-safe helpers (`L`, `N`, `B` in `ServerLaunch`).
 23b. **A .NET class can't have a property with its own name, so the SDK renames such fields:** EC2's
     `InstanceStatus.InstanceStatus` is `InstanceStatus.Status` in .NET.
+23d. **`TextRenderer` ignores `Graphics.TranslateTransform` unless given `TextFormatFlags.PreserveGraphicsTranslateTransform`.**
+    In a scrolled, owner-drawn view (NotesView), text without it stays put while shapes move. Also invalidate fully in
+    `OnScroll` / `OnMouseWheel`, since scrolling only repaints the revealed strip.
 23c. **Don't name members after built-in Control/Form members** (`Layout`, `Text`, `Tag`, `Region`, `Font` ...): it
     hides them (CS0108) or clashes. Use `Arrange`, `Draw`, `DrawTag`, `SelectedRegion` and the like.
 24. **C# forbids reusing a local name in a nested scope, even if the outer one is declared later in the method**

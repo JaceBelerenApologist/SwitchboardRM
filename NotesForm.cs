@@ -182,9 +182,13 @@ internal sealed class NotesView : ScrollableControl
         _code = Theme.CreateFont(Theme.TerminalFont, 9F);
     }
 
-    private const TextFormatFlags Flags = TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding;
-    private static int W(string s, Font f) => TextRenderer.MeasureText(s, f, Size.Empty, Flags).Width;
-    private static int H(Font f) => TextRenderer.MeasureText("Ag", f, Size.Empty, Flags).Height;
+    // PreserveGraphicsTranslateTransform: TextRenderer otherwise ignores the scroll offset (TranslateTransform in OnPaint)
+    // and draws text where it would be unscrolled, while shapes do move
+    private const TextFormatFlags Flags = TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding |
+                                          TextFormatFlags.PreserveGraphicsTranslateTransform;
+    private const TextFormatFlags MeasureFlags = TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding;
+    private static int W(string s, Font f) => TextRenderer.MeasureText(s, f, Size.Empty, MeasureFlags).Width;
+    private static int H(Font f) => TextRenderer.MeasureText("Ag", f, Size.Empty, MeasureFlags).Height;
 
     protected override void OnResize(EventArgs e)
     {
@@ -219,6 +223,19 @@ internal sealed class NotesView : ScrollableControl
         Focus();
     }
 
+    // scrolling only repaints the newly shown strip by default; repaint everything so nothing is left behind
+    protected override void OnScroll(ScrollEventArgs se)
+    {
+        base.OnScroll(se);
+        Invalidate();
+    }
+
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        base.OnMouseWheel(e);
+        Invalidate();
+    }
+
     protected override bool IsInputKey(Keys keyData) =>
         keyData is Keys.Up or Keys.Down or Keys.PageUp or Keys.PageDown or Keys.Home or Keys.End || base.IsInputKey(keyData);
 
@@ -233,6 +250,7 @@ internal sealed class NotesView : ScrollableControl
             Keys.Home => 0, Keys.End => AutoScrollMinSize.Height, _ => y,
         };
         AutoScrollPosition = new Point(0, Math.Max(0, y));
+        Invalidate();
     }
 
     /// <summary>Lays everything out top to bottom at the current width; draws it when g is given. Returns the height.</summary>
@@ -359,7 +377,8 @@ internal sealed class NotesView : ScrollableControl
             g.FillPath(brush, path);
             g.SmoothingMode = old;
             TextRenderer.DrawText(g, label, _small, r, ColorMath.TextOn(fill),
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine |
+                TextFormatFlags.PreserveGraphicsTranslateTransform);
         }
         return x + w;
     }
