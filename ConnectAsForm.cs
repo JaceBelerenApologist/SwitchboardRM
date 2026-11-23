@@ -35,6 +35,7 @@ internal sealed class ConnectAsForm : Form
 
         _user.Items.AddRange(recentUsers.Where(u => !string.IsNullOrWhiteSpace(u)).Cast<object>().ToArray());
         _password.PlaceholderText = "Optional";
+        Theme.AddPasswordReveal(_password);
 
         var body = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Padding = new Padding(20, 16, 20, 16) };
         body.Controls.Add(Heading("User", first: true));

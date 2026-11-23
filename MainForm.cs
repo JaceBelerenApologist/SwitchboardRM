@@ -124,6 +124,7 @@ internal sealed class MainForm : Form
     private readonly ToolStripMenuItem _miDock = new("Docked &terminals") { ShortcutKeyDisplayString = "Ctrl+`" };
     private readonly ToolStripMenuItem _tabMenuDock = new("Dock to bottom");
     private readonly ToolStripMenuItem _tabMenuReconnect = new("&Reconnect");
+    private readonly ToolStripMenuItem _tabMenuCad = new("Send Ctrl+Alt+&Del");
     private readonly ContextMenuStrip _placeholderMenu = new();   // restored tabs waiting for a click
     private TabPage _placeholderTarget;
     private readonly ToolStripMenuItem _tabMenuLeft = new("Move left");
@@ -582,6 +583,7 @@ internal sealed class MainForm : Form
         _split.Panel2.Controls.Add(_dockSplit);
 
         _tabMenu.Items.Add(_tabMenuReconnect);
+        _tabMenu.Items.Add(_tabMenuCad);
         _tabMenu.Items.Add(new ToolStripSeparator());
         _tabMenu.Items.Add(_tabMenuLeft);
         _tabMenu.Items.Add(_tabMenuRight);
@@ -594,11 +596,31 @@ internal sealed class MainForm : Form
             _tabMenuDock.Visible = _menuTarget?.Term != null;
             _tabMenuDock.Text = _menuTarget is { Docked: true } ? "Move back to a tab" : "Dock to bottom";
             _tabMenuReconnect.Visible = _menuTarget is { Kind: Protocol.Rdp or Protocol.Ssh };
+            _tabMenuCad.Visible = _menuTarget?.Rdp != null;
+            int rdpState = 0;
+            try { rdpState = _menuTarget?.Rdp?.ConnectionState() ?? 0; } catch { }
+            _tabMenuCad.Enabled = rdpState == 1;   // only into a connected session
             var (strip, index) = TabPosition(_menuTarget);
             _tabMenuLeft.Enabled = index > 0;
             _tabMenuRight.Enabled = strip != null && index >= 0 && index < strip.TabCount - 1;
         };
         _tabMenuReconnect.Click += async (_, _) => await ReconnectSessionAsync(_menuTarget);
+        _tabMenuCad.Click += (_, _) =>
+        {
+            var target = _menuTarget;
+            if (target?.Rdp == null) return;
+            _tabs.SelectedTab = target.Page;   // the session needs to be the one on screen to take the keys
+            try
+            {
+                target.Rdp.SendCtrlAltDel();
+                SetStatus($"Sent Ctrl+Alt+Del to {target.Inst.Name} (Ctrl+Alt+End does the same from the keyboard).");
+            }
+            catch (Exception ex)
+            {
+                Log.Write("Ctrl+Alt+Del not sent: " + ex.Message);
+                SetStatus($"Ctrl+Alt+Del couldn't be sent: {ex.Message}. Click into the session and press Ctrl+Alt+End instead.");
+            }
+        };
         _placeholderMenu.Items.Add("&Reconnect", null, async (_, _) => { if (_placeholderTarget != null) await ActivatePlaceholderAsync(_placeholderTarget); });
         _placeholderMenu.Items.Add("Close tab", null, (_, _) =>
         {

@@ -14,6 +14,30 @@ internal interface IMsTscNonScriptable
 }
 
 /// <summary>
+/// The RDP client's non-scriptable interface with SendKeys (for Send Ctrl+Alt+Del). COM calls by slot position, so every
+/// method of the base interface (IMsTscNonScriptable) is declared first, in its order, then this interface's two.
+/// </summary>
+[ComImport, Guid("2F079C4C-87B2-4AFD-97AB-20CDB43038AE"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IMsRdpClientNonScriptable
+{
+    // IMsTscNonScriptable
+    void PutClearTextPassword([MarshalAs(UnmanagedType.BStr)] string value);
+    void PutPortablePassword([MarshalAs(UnmanagedType.BStr)] string value);
+    [return: MarshalAs(UnmanagedType.BStr)] string GetPortablePassword();
+    void PutPortableSalt([MarshalAs(UnmanagedType.BStr)] string value);
+    [return: MarshalAs(UnmanagedType.BStr)] string GetPortableSalt();
+    void PutBinaryPassword([MarshalAs(UnmanagedType.BStr)] string value);
+    [return: MarshalAs(UnmanagedType.BStr)] string GetBinaryPassword();
+    void PutBinarySalt([MarshalAs(UnmanagedType.BStr)] string value);
+    [return: MarshalAs(UnmanagedType.BStr)] string GetBinarySalt();
+    void ResetPassword();
+    // IMsRdpClientNonScriptable
+    void NotifyRedirectDeviceChange(IntPtr wParam, IntPtr lParam);
+    /// <summary>pbArrayKeyUp: VARIANT_BOOL[] (0 = down, -1 = up); plKeyData: int[] of scan codes.</summary>
+    void SendKeys(int numKeys, IntPtr pbArrayKeyUp, IntPtr plKeyData);
+}
+
+/// <summary>
 /// The RDP control's events interface. Only the event Switchboard needs is declared; the control's other events
 /// are simply not handled.
 /// </summary>
@@ -221,6 +245,24 @@ internal sealed class RdpHost : AxHost
     {
         if (disposing) _resizeTimer.Dispose();
         base.Dispose(disposing);
+    }
+
+    /// <summary>
+    /// Ctrl+Alt+Del inside the session (the keys themselves always go to this PC; Ctrl+Alt+End does the same from the
+    /// keyboard): Ctrl, Alt and Delete down, then up, as scan codes.
+    /// </summary>
+    public void SendCtrlAltDel()
+    {
+        if (GetOcx() is not IMsRdpClientNonScriptable keys)
+            throw new InvalidOperationException("this Remote Desktop control can't send keys");
+        Focus();
+        short[] up = { 0, 0, 0, -1, -1, -1 };                    // VARIANT_BOOL: false = pressed, true (-1) = released
+        int[] scan = { 0x1D, 0x38, 0x53, 0x53, 0x38, 0x1D };     // Ctrl, Alt, Delete ... Delete, Alt, Ctrl
+        var upHandle = GCHandle.Alloc(up, GCHandleType.Pinned);
+        var scanHandle = GCHandle.Alloc(scan, GCHandleType.Pinned);
+        try { keys.SendKeys(scan.Length, upHandle.AddrOfPinnedObject(), scanHandle.AddrOfPinnedObject()); }
+        finally { upHandle.Free(); scanHandle.Free(); }
+        Log.Write("Sent Ctrl+Alt+Del to the remote session");
     }
 
     /// <summary>0 = disconnected, 1 = connected, 2 = connecting.</summary>

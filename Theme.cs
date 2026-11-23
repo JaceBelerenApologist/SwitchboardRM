@@ -399,6 +399,63 @@ internal static class Theme
     }
 
     /// <summary>Dark title bar (Windows 10 2004+ / 11) and a purple window border (Windows 11).</summary>
+    private const int EM_SETMARGINS = 0xD3, EC_RIGHTMARGIN = 0x2;   // sent with Theme's existing SendMessage
+
+    /// <summary>
+    /// An eye button inside the right edge of a password box: click to show the password (to check for typos) and again
+    /// to hide it. The text keeps clear of the button, and the button follows the box's colours.
+    /// </summary>
+    public static void AddPasswordReveal(TextBox box)
+    {
+        if (box.Controls.OfType<Label>().Any(l => Equals(l.Tag, "reveal"))) return;
+        bool system = box.UseSystemPasswordChar;
+        char mask = box.PasswordChar;
+        bool shown = false;
+        var tip = new ToolTip();
+        var eye = new Label
+        {
+            Tag = "reveal", Text = Icons.Show, Font = new Font(Icons.Font.FontFamily, 10F),
+            Width = box.LogicalToDeviceUnits(22), TextAlign = ContentAlignment.MiddleCenter, Cursor = Cursors.Hand,
+            BackColor = box.BackColor, ForeColor = Current.Muted, UseMnemonic = false,
+        };
+        tip.SetToolTip(eye, "Show password");
+        eye.Click += (_, _) =>
+        {
+            shown = !shown;
+            if (system) box.UseSystemPasswordChar = !shown;
+            else box.PasswordChar = shown ? '\0' : mask;
+            eye.Text = shown ? Icons.Hide : Icons.Show;
+            tip.SetToolTip(eye, shown ? "Hide password" : "Show password");
+            box.Focus();
+            box.SelectionStart = box.TextLength;
+        };
+        // the theme recolours labels for the window: keep this one the box's colours
+        box.BackColorChanged += (_, _) => eye.BackColor = box.BackColor;
+        eye.BackColorChanged += (_, _) => { if (eye.BackColor != box.BackColor) eye.BackColor = box.BackColor; };
+        eye.ForeColorChanged += (_, _) => { if (eye.ForeColor != Current.Muted) eye.ForeColor = Current.Muted; };
+        box.Controls.Add(eye);
+
+        // inset from the box's top, right and bottom edges, so its border is never covered (the dark theme's single line
+        // and the light theme's 3D edge alike); kept there as the box resizes
+        void Place()
+        {
+            int inset = box.LogicalToDeviceUnits(2);
+            var area = box.ClientSize;
+            eye.Bounds = new Rectangle(area.Width - eye.Width - inset, inset, eye.Width, Math.Max(1, area.Height - inset * 2));
+        }
+
+        // keep typed text clear of the button (and again whenever the box's window is recreated, e.g. on toggling)
+        void Margin()
+        {
+            if (box.IsHandleCreated)
+                SendMessage(box.Handle, EM_SETMARGINS, (IntPtr)EC_RIGHTMARGIN, (IntPtr)((eye.Width + box.LogicalToDeviceUnits(4)) << 16));
+        }
+        box.ClientSizeChanged += (_, _) => Place();
+        box.HandleCreated += (_, _) => { Place(); Margin(); };
+        Place();
+        Margin();
+    }
+
     public static void ApplyTitleBar(Form f)
     {
         EnableDpiRescaling(f);
@@ -473,6 +530,8 @@ internal static class Icons
     public const string SignIn = "\uE77B";   // person
     public const string SignOut = "\uE7E8";  // power
     public const string Terminal = "\uE756"; // command prompt
+    public const string Show = "\uE890";     // eye (show password)
+    public const string Hide = "\uED1A";     // crossed-out eye (hide password)
     public const string Undock = "\uE8A7";   // open in a new window (back to a tab)
     public const string HideDown = "\uE70D"; // chevron down
     public const string ShowUp = "\uE70E";   // chevron up

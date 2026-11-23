@@ -3,6 +3,14 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.18.0 (2026-12-03)
+
+- Send Ctrl+Alt+Del on a Remote Desktop tab's right-click menu (while connected): opens the server's security screen
+  (lock, sign out, change password, Task Manager), or its sign-in at a lock screen. Pressing Ctrl+Alt+Del yourself
+  always goes to this PC; Ctrl+Alt+End inside the session does the same as this menu item.
+- Password fields (Settings > RDP credentials, the connection editor, Connect as) have an eye button: click it to show
+  the password and check it for typos before saving, and again to hide it.
+
 ## 3.17.1 (2026-12-02)
 
 - Fixed: a Remote Desktop tab closed as soon as its connection dropped, even when that was a network blip (switching

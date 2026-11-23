@@ -535,6 +535,7 @@ internal sealed class SettingsForm : Form
         };
 
         _txtCredUser.PlaceholderText = @"DOMAIN\user or user";
+        Theme.AddPasswordReveal(_txtCredPass);
         _txtCredUser.TextChanged += (_, _) =>
             _txtCredPass.PlaceholderText = CredentialStore.Exists(_txtCredUser.Text) ? "Leave blank to keep the saved password" : "";
 

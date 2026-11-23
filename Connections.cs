@@ -226,6 +226,7 @@ internal sealed class ConnectionForm : Form
     {
         base.OnHandleCreated(e);
         Theme.ApplyTitleBar(this);
+        Theme.AddPasswordReveal(_txtPass);
     }
 
     private static Label Field(string text) => new() { Text = text, AutoSize = true, Margin = new Padding(0, 8, 0, 3) };
