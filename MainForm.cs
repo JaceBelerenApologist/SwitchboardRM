@@ -1476,7 +1476,7 @@ internal sealed class MainForm : Form
     private void SwitchTab(int direction) => SwitchTabIn(_tabs, direction);
 
     /// <summary>Next / previous tab within one tab strip (the main tabs, or the docked terminals).</summary>
-    private void SwitchTabIn(TabControl strip, int direction)
+    private void SwitchTabIn(ThemedTabControl strip, int direction)
     {
         int count = strip.TabCount;
         if (count == 0) return;
@@ -3001,7 +3001,7 @@ internal sealed class MainForm : Form
 
     private void OnTabMouseUp(object sender, MouseEventArgs e)
     {
-        var strip = sender as TabControl ?? _tabs;
+        var strip = sender as ThemedTabControl ?? _tabs;   // TabCount without the + slot
         for (int i = 0; i < strip.TabCount; i++)
         {
             if (!strip.GetTabRect(i).Contains(e.Location)) continue;

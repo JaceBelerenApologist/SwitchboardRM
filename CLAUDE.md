@@ -368,8 +368,15 @@ commands by `$LASTEXITCODE`, never by stderr (9.1). Parse-check with
     a Paint handler (`Theme.AttachFauxBold`, from `ApplyFont`) that repaints background + text twice when their font is
     a fake bold (checked at paint time); owner-drawn text (HoverTip, TerminalPreview) does the same itself.
 25g. **The tab strip's overflow arrows are a native `msctls_updown32` child** that the theme can't reach: `ThemedTabControl`
-    finds it (`ScrollArrowsRect`) and skins it with a `NativeWindow` that draws over it after each WM_PAINT; the + moves
-    left of it when it's showing. **Open menus with `Theme.ShowMenuOnScreen(menu, screenPoint)`**, not `menu.Show(...)`:
+    finds it (`ScrollArrowsRect`) and skins it with a `NativeWindow` (classic style via `SetWindowTheme`, redrawn after
+    paint and mouse messages). Since 3.21.0 the tabs are `TabSizeMode.Fixed` (`UpdateTabWidths`: 240-120 px, sharing
+    the strip) and **the + is a hidden last TabPage (`_plusPage`) kept inside the strip**: `TabCount` is hidden (`new`)
+    to count real tabs only (use `base.TabCount` for the raw count inside the class), `KeepPlusLast` adds/moves/removes
+    it (keeping the selected tab), it's never selected (`OnSelectedIndexChanged` redirects), and clicks on its slot are
+    handled in WndProc. Outside the class, use the strip as `ThemedTabControl`, never as a plain `TabControl` (that
+    would count the + tab). Repaint fully on WM_HSCROLL (Windows shifts pixels when scrolling). **Setting `ItemSize` re-enters
+    `OnResize`** (the tab control nudges its size by a pixel to re-lay out), so `UpdateTabWidths` guards against
+    re-entry; without it, the app died at start-up with a stack overflow (no log, no dialog). **Open menus with `Theme.ShowMenuOnScreen(menu, screenPoint)`**, not `menu.Show(...)`:
     WinForms lets a menu run onto the next screen when opened near a screen edge.
 26a. **Reordering tabs must not remove and re-insert pages:** taking an RDP page out of its TabControl (even
     briefly) drops the connection. `ThemedTabControl.MoveTab` reorders by assigning positions

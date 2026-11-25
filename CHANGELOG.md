@@ -3,6 +3,13 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.21.0 (2026-12-09)
+
+- Tabs share the strip like a browser's: up to 240 pixels each, all narrowing together as more open (long titles
+  shortened, the badge and × always shown), down to 120 pixels. The scroll arrows only appear past that.
+- The + is the last slot in the strip, so it's never on top of a tab: scrolled to the end, the last tab and its × are
+  fully visible, with the + after them. It's drawn like a tab's ×: an accent-coloured circle under the mouse.
+
 ## 3.20.1 (2026-12-08)
 
 - Fixed: with more tabs than fit, the tab strip's scroll arrows weren't themed and covered the + button. They're drawn

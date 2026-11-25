@@ -897,16 +897,106 @@ internal sealed class ThemedTabControl : TabControl
     private int _hoverClose = -1;
     private bool _hoverPlus;
 
+    // ---- the + is a real (hidden) last tab: Windows lays it out like any tab, so it's never over a tab, scrolls with
+    // them, and is fully visible at the end of the strip. It only exists while there are real tabs, is never selected,
+    // and isn't counted: TabCount is the real tabs (base.TabCount includes the +).
+
+    private readonly TabPage _plusPage = new(" ");
+    private bool _adjusting;
+
+    /// <summary>The real tabs (the + slot at the end isn't one).</summary>
+    public new int TabCount => base.TabCount - (TabPages.Contains(_plusPage) ? 1 : 0);
+
+    private int PlusIndex => TabPages.IndexOf(_plusPage);
+
+    /// <summary>The + circle, in the + slot (empty when there's no + or it's scrolled out of view).</summary>
     private Rectangle PlusRect()
     {
-        if (TabCount == 0) return Rectangle.Empty;
-        var last = GetTabRect(TabCount - 1);
-        int top = last.Top + (last.Height - PlusSize) / 2 + 1;
-        // too many tabs: Windows shows its scroll arrows at the right end of the strip; the + goes just left of them
-        // (after the last tab it would be hidden under them)
+        int index = PlusIndex;
+        if (index < 0) return Rectangle.Empty;
+        var slot = GetTabRect(index);
+        var r = new Rectangle(slot.Left + Px(6), slot.Top + (slot.Height - PlusSize) / 2 + 1, PlusSize, PlusSize);
         var arrows = ScrollArrowsRect();
-        if (!arrows.IsEmpty) return new Rectangle(arrows.Left - PlusSize - 6, top, PlusSize, PlusSize);
-        return new Rectangle(last.Right + 6, top, PlusSize, PlusSize);
+        if (r.Right <= 0 || r.Left >= ClientSize.Width || (!arrows.IsEmpty && r.Right > arrows.Left)) return Rectangle.Empty;
+        return r;
+    }
+
+    /// <summary>The + slot itself (clicks anywhere in it are handled here and never select it).</summary>
+    private Rectangle PlusSlot() => PlusIndex is var i && i >= 0 ? GetTabRect(i) : Rectangle.Empty;
+
+    /// <summary>The + slot: added with the first real tab, kept last, removed with the last real tab.</summary>
+    private void KeepPlusLast()
+    {
+        if (_adjusting || IsDisposed) return;
+        _adjusting = true;
+        try
+        {
+            bool has = TabPages.Contains(_plusPage);
+            if (TabCount == 0) { if (has) TabPages.Remove(_plusPage); return; }
+            if (!has) { TabPages.Add(_plusPage); return; }
+            int at = PlusIndex, last = base.TabCount - 1;
+            if (at == last) return;
+            // Windows keeps the selected position, not the selected tab, while positions are relabelled: restore it after
+            var selected = SelectedTab;
+            while (at < last)
+            {
+                // relabel positions (TabPages[i] = page), as MoveTab does: no page is detached
+                var next = TabPages[at + 1];
+                TabPages[at + 1] = _plusPage;
+                TabPages[at] = next;
+                at++;
+            }
+            if (selected != null && selected != _plusPage && SelectedTab != selected) SelectedTab = selected;
+        }
+        finally
+        {
+            _adjusting = false;
+            UpdateTabWidths();
+            if (SelectedTab == _plusPage && TabCount > 0) SelectedIndex = TabCount - 1;
+        }
+    }
+
+    // tabs share the strip like a browser's: up to 240 px each, all narrowing together as more open, down to 120 px;
+    // only past that do Windows' scroll arrows appear (the + slot counts as one tab)
+    private int MaxTabWidth => Px(240);
+    private int MinTabWidth => Px(120);
+
+    private bool _sizingTabs;
+
+    private void UpdateTabWidths()
+    {
+        // Setting ItemSize makes the tab control nudge its own size by a pixel and back to re-lay itself out, which
+        // fires OnResize and comes back here: ignore those, or each pass sets a new size and it never ends (3.21.0 at
+        // first: endless recursion, a stack overflow at start-up)
+        if (IsDisposed || _sizingTabs) return;
+        _sizingTabs = true;
+        try
+        {
+            int height = TextRenderer.MeasureText("Ag", Font).Height + Padding.Y * 2 + Px(4);
+            int slots = Math.Max(1, base.TabCount);
+            int width = Math.Clamp((ClientSize.Width - Px(4)) / slots, MinTabWidth, MaxTabWidth);
+            var size = new Size(width, height);
+            if (ItemSize != size) ItemSize = size;
+        }
+        finally { _sizingTabs = false; }
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        UpdateTabWidths();
+    }
+
+    protected override void OnFontChanged(EventArgs e)
+    {
+        base.OnFontChanged(e);
+        UpdateTabWidths();
+    }
+
+    protected override void OnControlAdded(ControlEventArgs e)
+    {
+        base.OnControlAdded(e);
+        if (e.Control != _plusPage) KeepPlusLast();
     }
 
     // ---- the scroll arrows Windows adds when the tabs don't fit (a native "msctls_updown32" child): drawn themed
@@ -1039,13 +1129,19 @@ internal sealed class ThemedTabControl : TabControl
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
                  ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         Padding = new Point(Px(22), Px(6)); // room for the × on the right
+        SizeMode = TabSizeMode.Fixed;          // set before the handle exists (changing it later recreates the control)
+        _plusPage.Tag = PlusTag;
+        UpdateTabWidths();
     }
+
+    private const string PlusTag = "switchboard:new-tab";
 
     /// <summary>The window moved to a screen with different scaling: the tab padding follows.</summary>
     protected override void RescaleConstantsForDpi(int deviceDpiOld, int deviceDpiNew)
     {
         base.RescaleConstantsForDpi(deviceDpiOld, deviceDpiNew);
         Padding = new Point((int)Math.Round(22 * deviceDpiNew / 96.0), (int)Math.Round(6 * deviceDpiNew / 96.0));
+        UpdateTabWidths();
         Invalidate();
     }
 
@@ -1116,6 +1212,7 @@ internal sealed class ThemedTabControl : TabControl
                 BeginInvoke(() => NewTabRequested?.Invoke(screen));
                 return;
             }
+            if (PlusSlot().Contains(pt)) return;   // the rest of the + slot: empty strip, not a tab to select
         }
         base.WndProc(ref m);
     }
@@ -1204,11 +1301,19 @@ internal sealed class ThemedTabControl : TabControl
     {
         base.OnControlRemoved(e);
         _hoverClose = -1;
+        // after the removal has finished: drop the + if that was the last real tab, and re-share the width
+        if (e.Control != _plusPage && IsHandleCreated) BeginInvoke(new Action(KeepPlusLast));
         Invalidate();
     }
 
     protected override void OnSelectedIndexChanged(EventArgs e)
     {
+        // the + slot is never the selected tab (closing the tab before it, or the keyboard, could land on it)
+        if (SelectedTab == _plusPage && !_adjusting)
+        {
+            if (TabCount > 0) SelectedIndex = TabCount - 1;
+            return;
+        }
         base.OnSelectedIndexChanged(e);
         Invalidate();
     }
@@ -1304,24 +1409,22 @@ internal sealed class ThemedTabControl : TabControl
             DrawClose(g, CloseRect(i), sel, i == _hoverClose, p);
         }
 
-        // + after the last tab: a new local shell (beside the scroll arrows when the tabs overflow, on the strip's own
-        // colour so tabs scrolled underneath don't show through)
+        // the + (its own slot at the end): drawn like the tabs' ×: muted strokes, an accent circle under the mouse
         var plusRect = PlusRect();
         if (!plusRect.IsEmpty)
         {
-            var arrowsRect = ScrollArrowsRect();
-            if (!arrowsRect.IsEmpty)
-                using (var strip = new SolidBrush(p.Raised))
-                    g.FillRectangle(strip, plusRect.Left - 6, 0, arrowsRect.Left - plusRect.Left + 6, stripBottom);
             var oldMode = g.SmoothingMode;
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             if (_hoverPlus)
             {
-                using var hb = new SolidBrush(p.Hover);
+                using var hb = new SolidBrush(p.Accent);
                 g.FillEllipse(hb, plusRect);
             }
-            using var pen = new Pen(_hoverPlus ? p.AccentFore : p.Muted, 1.8f);
-            int cx = plusRect.Left + plusRect.Width / 2, cy = plusRect.Top + plusRect.Height / 2, arm = 5;
+            using var pen = new Pen(_hoverPlus ? p.AccentText : p.Muted, 1.6f)
+            {
+                StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round,
+            };
+            int cx = plusRect.Left + plusRect.Width / 2, cy = plusRect.Top + plusRect.Height / 2, arm = Px(5);
             g.DrawLine(pen, cx - arm, cy, cx + arm, cy);
             g.DrawLine(pen, cx, cy - arm, cx, cy + arm);
             g.SmoothingMode = oldMode;
