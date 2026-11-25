@@ -3,6 +3,16 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.20.1 (2026-12-08)
+
+- Fixed: with more tabs than fit, the tab strip's scroll arrows weren't themed and covered the + button. They're drawn
+  in the theme's colours now (with a themed highlight under the mouse), and the + sits just to their left.
+- The mouse wheel over the tab strip scrolls the tabs when there are more than fit: up for left, down for right (a
+  tilt wheel or horizontal touchpad scroll too). It doesn't change which tab is selected.
+- Fixed: scrolling the tab strip could leave a copy of the + button behind, moving along with the tabs.
+- Fixed: menus opened near the edge of a screen (the + menus, a tab's right-click menu, the column menu) could open
+  across onto the next screen. They now open leftwards or upwards to stay on the screen they were opened on.
+
 ## 3.20.0 (2026-12-07)
 
 - VNC in tabs. Saved connections can be VNC (default port 5900), and AWS servers have Connect with VNC on their
@@ -12,7 +22,7 @@ PATCH for fixes, MINOR for new features, MAJOR for changes that break existing s
   this PC's clipboard text on the remote one. Send Ctrl+Alt+Del, Reconnect, the VNC / AWS badge and restoring tabs
   work as for Remote Desktop. Built on noVNC (MPL 2.0), included in the app; it talks to the VNC server through a
   relay inside Switchboard that only this PC can use.
-- Tab badges have their own fixed colours, no longer the accent colour: RDP in magenta, SSH in pink and VNC in teal,
+- Tab badges have their own fixed colours, no longer the accent colour: RDP in indigo, SSH in magenta and VNC in teal,
   alongside AWS in orange. Saved SSH and VNC tabs no longer repeat "· SSH" / "· VNC"
   after the name, since their badge says it; AWS tabs keep it, as their badge says AWS whatever the protocol.
 - Fixed: a server tooltip could stay on screen, on top of other windows and other apps, when a dialog opened (adding

@@ -367,6 +367,10 @@ commands by `$LASTEXITCODE`, never by stderr (9.1). Parse-check with
     `ThemedRenderer.OnRenderItemText` then draws menu text twice (+1 px) for a fake bold; labels and flat buttons get
     a Paint handler (`Theme.AttachFauxBold`, from `ApplyFont`) that repaints background + text twice when their font is
     a fake bold (checked at paint time); owner-drawn text (HoverTip, TerminalPreview) does the same itself.
+25g. **The tab strip's overflow arrows are a native `msctls_updown32` child** that the theme can't reach: `ThemedTabControl`
+    finds it (`ScrollArrowsRect`) and skins it with a `NativeWindow` that draws over it after each WM_PAINT; the + moves
+    left of it when it's showing. **Open menus with `Theme.ShowMenuOnScreen(menu, screenPoint)`**, not `menu.Show(...)`:
+    WinForms lets a menu run onto the next screen when opened near a screen edge.
 26a. **Reordering tabs must not remove and re-insert pages:** taking an RDP page out of its TabControl (even
     briefly) drops the connection. `ThemedTabControl.MoveTab` reorders by assigning positions
     (`TabPages[i] = page`, which only relabels the native tab items) in neighbour swaps, then sets `SelectedIndex`.

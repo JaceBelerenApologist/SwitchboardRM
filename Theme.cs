@@ -526,6 +526,19 @@ internal static class Theme
         Margin();
     }
 
+    /// <summary>
+    /// Open a menu at a screen point without it crossing onto another screen: if it would run past the edge of the
+    /// screen it opens on, it opens leftwards (or upwards) from the point instead.
+    /// </summary>
+    public static void ShowMenuOnScreen(ToolStripDropDown menu, Point at)
+    {
+        var area = Screen.FromPoint(at).WorkingArea;
+        var size = menu.GetPreferredSize(Size.Empty);
+        int x = at.X + size.Width > area.Right ? Math.Max(area.Left, at.X - size.Width) : at.X;
+        int y = at.Y + size.Height > area.Bottom ? Math.Max(area.Top, at.Y - size.Height) : at.Y;
+        menu.Show(new Point(x, y));
+    }
+
     public static void ApplyTitleBar(Form f)
     {
         EnableDpiRescaling(f);
@@ -888,7 +901,137 @@ internal sealed class ThemedTabControl : TabControl
     {
         if (TabCount == 0) return Rectangle.Empty;
         var last = GetTabRect(TabCount - 1);
-        return new Rectangle(last.Right + 6, last.Top + (last.Height - PlusSize) / 2 + 1, PlusSize, PlusSize);
+        int top = last.Top + (last.Height - PlusSize) / 2 + 1;
+        // too many tabs: Windows shows its scroll arrows at the right end of the strip; the + goes just left of them
+        // (after the last tab it would be hidden under them)
+        var arrows = ScrollArrowsRect();
+        if (!arrows.IsEmpty) return new Rectangle(arrows.Left - PlusSize - 6, top, PlusSize, PlusSize);
+        return new Rectangle(last.Right + 6, top, PlusSize, PlusSize);
+    }
+
+    // ---- the scroll arrows Windows adds when the tabs don't fit (a native "msctls_updown32" child): drawn themed
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string title);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hWnd, out RECT rect);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool InvalidateRect(IntPtr hWnd, IntPtr rect, bool erase);
+    [System.Runtime.InteropServices.DllImport("uxtheme.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int SetWindowTheme(IntPtr hWnd, string app, string idList);
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern IntPtr SendMessageInts(IntPtr hWnd, int msg, out int wParam, out int lParam);
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern IntPtr SendMessagePtr(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+    private const int WM_MOUSEWHEEL = 0x020A, WM_MOUSEHWHEEL = 0x020E, WM_HSCROLL = 0x0114, SB_THUMBPOSITION = 4;
+    private const int UDM_GETRANGE32 = 0x0400 + 112, UDM_SETPOS32 = 0x0400 + 113, UDM_GETPOS32 = 0x0400 + 114;
+
+    /// <summary>
+    /// The mouse wheel over the strip scrolls the tabs when they overflow (up/left, down/right; a tilt wheel or
+    /// horizontal touchpad scroll too), one tab per notch. The selected tab doesn't change.
+    /// </summary>
+    private bool ScrollTabs(int steps)
+    {
+        if (!IsHandleCreated || steps == 0) return false;
+        IntPtr h = FindWindowEx(Handle, IntPtr.Zero, "msctls_updown32", null);
+        if (h == IntPtr.Zero || !IsWindowVisible(h)) return false;
+        SendMessageInts(h, UDM_GETRANGE32, out int low, out int high);
+        int pos = (int)SendMessagePtr(h, UDM_GETPOS32, IntPtr.Zero, IntPtr.Zero);
+        int next = Math.Clamp(pos + steps, Math.Min(low, high), Math.Max(low, high));
+        if (next == pos) return true;
+        SendMessagePtr(h, UDM_SETPOS32, IntPtr.Zero, (IntPtr)next);
+        // the same message the arrows send the tab control when clicked
+        SendMessagePtr(Handle, WM_HSCROLL, (IntPtr)((next << 16) | SB_THUMBPOSITION), h);
+        Invalidate();
+        InvalidateRect(h, IntPtr.Zero, true);
+        return true;
+    }
+
+    private ArrowsSkin _arrows;
+
+    /// <summary>Where the scroll arrows are (client coordinates), or empty when the tabs fit. Skins them when they appear.</summary>
+    private Rectangle ScrollArrowsRect()
+    {
+        if (!IsHandleCreated) return Rectangle.Empty;
+        IntPtr h = FindWindowEx(Handle, IntPtr.Zero, "msctls_updown32", null);
+        if (h == IntPtr.Zero || !IsWindowVisible(h)) return Rectangle.Empty;
+        if (_arrows == null || _arrows.Handle != h)
+        {
+            _arrows = new ArrowsSkin(this);
+            _arrows.AssignHandle(h);
+            SetWindowTheme(h, "", "");              // classic style: no hover highlight drawn behind our back
+            InvalidateRect(h, IntPtr.Zero, true);   // repaint it in the theme straight away
+        }
+        GetWindowRect(h, out var r);
+        return RectangleToClient(new Rectangle(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top));
+    }
+
+    /// <summary>Lets Windows handle the arrows (clicks, scrolling), then draws over them in the theme's colours.</summary>
+    private sealed class ArrowsSkin : NativeWindow
+    {
+        private const int WM_PAINT = 0x000F, WM_MOUSEMOVE = 0x0200, WM_LBUTTONDOWN = 0x0201, WM_LBUTTONUP = 0x0202,
+                          WM_TIMER = 0x0113, WM_CAPTURECHANGED = 0x0215, WM_MOUSELEAVE = 0x02A3, WM_ENABLE = 0x000A;
+        private readonly ThemedTabControl _owner;
+        private int _hot = -1;   // the half under the cursor: 0 left, 1 right
+        public ArrowsSkin(ThemedTabControl owner) { _owner = owner; }
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        private struct TRACKMOUSEEVENT { public int cbSize; public uint dwFlags; public IntPtr hwndTrack; public uint dwHoverTime; }
+        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool TrackMouseEvent(ref TRACKMOUSEEVENT e);
+
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            switch (m.Msg)
+            {
+                case WM_MOUSEMOVE:
+                {
+                    int x = (short)((long)m.LParam & 0xFFFF);
+                    GetClientRect(Handle, out var r);
+                    int hot = x < (r.Right - r.Left) / 2 ? 0 : 1;
+                    if (hot != _hot)
+                    {
+                        _hot = hot;
+                        var track = new TRACKMOUSEEVENT { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<TRACKMOUSEEVENT>(), dwFlags = 0x2 /* TME_LEAVE */, hwndTrack = Handle };
+                        TrackMouseEvent(ref track);
+                    }
+                    Draw();
+                    break;
+                }
+                case WM_MOUSELEAVE: _hot = -1; Draw(); break;
+                // anything after which Windows may have drawn its own look: draw ours again
+                case WM_PAINT: case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_TIMER: case WM_CAPTURECHANGED: case WM_ENABLE:
+                    Draw();
+                    break;
+            }
+        }
+
+        private void Draw()
+        {
+            if (Handle == IntPtr.Zero) return;
+            GetClientRect(Handle, out var r);
+            int w = r.Right - r.Left, h = r.Bottom - r.Top;
+            if (w <= 0 || h <= 0) return;
+            var p = Theme.Current;
+            using var g = Graphics.FromHwnd(Handle);
+            using (var back = new SolidBrush(p.Raised)) g.FillRectangle(back, 0, 0, w, h);
+            if (_hot >= 0)
+                using (var hover = new SolidBrush(p.Hover))
+                    g.FillRectangle(hover, _hot == 0 ? 1 : w / 2 + 1, 1, w / 2 - 1, h - 2);
+            using (var line = new Pen(p.Border))
+            {
+                g.DrawRectangle(line, 0, 0, w - 1, h - 1);
+                g.DrawLine(line, w / 2, 3, w / 2, h - 4);
+            }
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using var arrow = new SolidBrush(p.Text);
+            int a = Math.Max(3, Math.Min(w / 4, h / 3) / 2 + 1), cy = h / 2;
+            int lx = w / 4, rx = w * 3 / 4;
+            g.FillPolygon(arrow, new[] { new Point(lx - a / 2, cy), new Point(lx + a / 2 + 1, cy - a), new Point(lx + a / 2 + 1, cy + a) });
+            g.FillPolygon(arrow, new[] { new Point(rx + a / 2, cy), new Point(rx - a / 2 - 1, cy - a), new Point(rx - a / 2 - 1, cy + a) });
+        }
     }
 
     public ThemedTabControl()
@@ -921,6 +1064,30 @@ internal sealed class ThemedTabControl : TabControl
 
     protected override void WndProc(ref Message m)
     {
+        if (m.Msg == WM_HSCROLL)
+        {
+            // the strip scrolled (arrows, wheel, or a tab being brought into view): Windows shifts the strip's pixels
+            // and repaints only the revealed sliver, which would drag a copy of the fixed + along with the tabs.
+            // Repaint the whole strip instead.
+            base.WndProc(ref m);
+            Invalidate();
+            IntPtr arrows = FindWindowEx(Handle, IntPtr.Zero, "msctls_updown32", null);
+            if (arrows != IntPtr.Zero) InvalidateRect(arrows, IntPtr.Zero, true);
+            return;
+        }
+        if ((m.Msg == WM_MOUSEWHEEL || m.Msg == WM_MOUSEHWHEEL) && TabCount > 0)
+        {
+            // over the strip (not the page below it): scroll the tabs when they overflow
+            var pt = PointToClient(new Point((short)((long)m.LParam & 0xFFFF), (short)(((long)m.LParam >> 16) & 0xFFFF)));
+            if (pt.Y >= 0 && pt.Y < GetTabRect(0).Bottom)
+            {
+                int delta = (short)(((long)m.WParam >> 16) & 0xFFFF);
+                int notches = Math.Max(1, Math.Abs(delta) / 120);
+                // vertical wheel: up = left; horizontal (tilt / touchpad): right = right
+                int steps = m.Msg == WM_MOUSEWHEEL ? (delta > 0 ? -notches : notches) : (delta > 0 ? notches : -notches);
+                if (ScrollTabs(steps)) { m.Result = IntPtr.Zero; return; }
+            }
+        }
         // The Windows tab control calls the empty part of its tab strip "transparent", so clicks and hovers
         // there go to the window behind it. Claim it, so the + (and its hover highlight) work.
         if (m.Msg == WM_NCHITTEST)
@@ -1102,7 +1269,7 @@ internal sealed class ThemedTabControl : TabControl
                 string badge = tag[BadgeTagPrefix.Length..];
                 int w = BadgeWidth(badge);
                 var pill = new Rectangle(textRect.Left, textRect.Top + (textRect.Height - BadgeHeight) / 2 + 1, w, BadgeHeight);
-                // fixed colours: AWS in AWS's orange, RDP in magenta (#944792), SSH in pink (#D675C2), VNC in teal
+                // fixed colours: AWS in AWS's orange, RDP in indigo (#5B5EC5), SSH in magenta (#944792), VNC in teal
                 var (fill, fore) = badge switch
                 {
                     "AWS" => (Color.FromArgb(0xFF, 0x99, 0x00), Color.FromArgb(0x23, 0x2F, 0x3E)),
@@ -1137,10 +1304,15 @@ internal sealed class ThemedTabControl : TabControl
             DrawClose(g, CloseRect(i), sel, i == _hoverClose, p);
         }
 
-        // + after the last tab: a new local shell
+        // + after the last tab: a new local shell (beside the scroll arrows when the tabs overflow, on the strip's own
+        // colour so tabs scrolled underneath don't show through)
         var plusRect = PlusRect();
         if (!plusRect.IsEmpty)
         {
+            var arrowsRect = ScrollArrowsRect();
+            if (!arrowsRect.IsEmpty)
+                using (var strip = new SolidBrush(p.Raised))
+                    g.FillRectangle(strip, plusRect.Left - 6, 0, arrowsRect.Left - plusRect.Left + 6, stripBottom);
             var oldMode = g.SmoothingMode;
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             if (_hoverPlus)

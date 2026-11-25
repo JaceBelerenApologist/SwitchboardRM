@@ -754,7 +754,7 @@ internal sealed class MainForm : Form
         _dockTabs.NewTabRequested += screen =>
         {
             FillShellMenu(_shellMenu.Items, _shellMenu, docked: true);
-            _shellMenu.Show(screen);
+            Theme.ShowMenuOnScreen(_shellMenu, screen);
         };
         _dockTabs.SelectedIndexChanged += (_, _) => _sessions.FirstOrDefault(x => x.Page == _dockTabs.SelectedTab)?.Term?.FocusTerminal();
         _btnUndock.Click += (_, _) => { var d = SelectedDocked(); if (d != null) UndockSession(d); };
@@ -805,7 +805,7 @@ internal sealed class MainForm : Form
         {
             // the main tabs' +: a one-off connection, then the shells (the docked panel's + is shells only)
             FillShellMenu(_shellMenu.Items, _shellMenu, withConnect: true);
-            _shellMenu.Show(screen);
+            Theme.ShowMenuOnScreen(_shellMenu, screen);
         };
         _smAdHoc.Click += async (_, _) => await ConnectAdHocAsync();
         _tabs.CloseRequested += page =>
@@ -3012,7 +3012,7 @@ internal sealed class MainForm : Form
                 if (e.Button == MouseButtons.Right && _placeholders.ContainsKey(page))
                 {
                     _placeholderTarget = page;
-                    _placeholderMenu.Show(strip, e.Location);
+                    Theme.ShowMenuOnScreen(_placeholderMenu, strip.PointToScreen(e.Location));
                 }
                 return;
             }
@@ -3021,7 +3021,7 @@ internal sealed class MainForm : Form
             else if (e.Button == MouseButtons.Right)
             {
                 _menuTarget = session;
-                _tabMenu.Show(strip, e.Location);
+                Theme.ShowMenuOnScreen(_tabMenu, strip.PointToScreen(e.Location));
             }
             return;
         }
@@ -3607,7 +3607,7 @@ internal sealed class MainForm : Form
         }));
         _columnMenu.Items.Add(new ToolStripLabel("Drag a header to move it") { Enabled = false });
         Theme.ApplyMenu(_columnMenu);
-        _columnMenu.Show(screen);
+        Theme.ShowMenuOnScreen(_columnMenu, screen);
     }
 
     private void ToggleColumn(string key)
