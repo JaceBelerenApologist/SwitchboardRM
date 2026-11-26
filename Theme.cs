@@ -1217,7 +1217,8 @@ internal sealed class ThemedTabControl : TabControl
         base.WndProc(ref m);
     }
 
-    private int TabAt(Point pt)
+    /// <summary>The real tab under a point (not the + slot), or -1.</summary>
+    public int TabAt(Point pt)
     {
         for (int i = 0; i < TabCount; i++)
             if (GetTabRect(i).Contains(pt)) return i;

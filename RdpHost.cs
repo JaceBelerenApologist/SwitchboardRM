@@ -140,6 +140,11 @@ internal sealed class RdpHost : AxHost
         // Direct: check it and warn if it can't be verified, like mstsc does.
         Try(() => Set(adv, "AuthenticationLevel", direct ? 2u : 0u));
         Try(() => Set(adv, "RedirectClipboard", true));
+        // Remote Desktop's own reconnect retries the same address ("Reconnecting ... attempt 1 of 5") for minutes. Through
+        // a Session Manager tunnel that address is the tunnel's local end, which dies with the connection, so it can't
+        // succeed, and it holds back Switchboard's reconnect (which opens a fresh tunnel) until it gives up. Off for
+        // tunnels: a drop is reported at once. Direct connections keep it: there the address is still good.
+        Try(() => Set(adv, "EnableAutoReconnect", direct));
         // Ctrl+Alt+Left / Ctrl+Alt+Right hand the keyboard back to Switchboard (next / previous tab)
         Try(() => Set(adv, "HotKeyFocusReleaseLeft", 0x25));   // VK_LEFT
         Try(() => Set(adv, "HotKeyFocusReleaseRight", 0x27));  // VK_RIGHT

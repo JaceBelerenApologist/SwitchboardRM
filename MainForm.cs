@@ -205,7 +205,8 @@ internal sealed class MainForm : Form
     private ForwardsForm _forwardsForm;
 
     // restoring tabs (Settings > Terminal & SSH)
-    private const int ReconnectAtStart = 5;   // remote tabs reconnected at start-up; any more open as "Reconnect" placeholders
+    private const int ReconnectAtStart = 5;   // remote tabs reconnected at once at start-up; the rest follow in batches of this many
+    private static readonly TimeSpan ReconnectBatchPause = TimeSpan.FromSeconds(6);   // between those batches
     private readonly Dictionary<TabPage, TabState> _placeholders = new();
     private readonly List<TabState> _pendingRestore = new();   // AWS tabs waiting for sign-in and the server list
     private DateTime _restoredFrom = DateTime.Now;
@@ -250,6 +251,7 @@ internal sealed class MainForm : Form
     private ToolStripControlHost _keepHost;
     private readonly ToolTip _tips = new();
     private HoverTip _hoverTip;
+    private readonly List<HoverTip> _tabTips = new();
     private bool _syncingKeep; // set while the code (not the user) changes the checkbox
     private List<string> _columns = new();               // keys shown, in display order
     private readonly ContextMenuStrip _columnMenu = new();
@@ -471,6 +473,13 @@ internal sealed class MainForm : Form
         _list.GridLines = false; // row lines are drawn by ThemedListView
         // the server tooltips: a formatted card, mouse-transparent so moving down the list keeps working
         _hoverTip = new HoverTip(_list, item => item.Tag is Instance hovered ? TipFor(hovered) : null);
+        // the tabs: the same card as the server list for remote tabs, plus how the tab is connected
+        foreach (var tipStrip in new[] { _tabs, _dockTabs })
+        {
+            var tipTarget = tipStrip;
+            _tabTips.Add(new HoverTip(tipTarget, pt => tipTarget.TabAt(pt) is var tabIndex && tabIndex >= 0 ? tipTarget.TabPages[tabIndex] : null,
+                                      o => o is TabPage tipPage ? TabTipFor(tipPage) : null));
+        }
         _list.AllowColumnReorder = true; // drag headers; Name is kept first (see ColumnReordered)
         _list.Font = new Font("Segoe UI", 10F);
         _savedView = _settings.SavedView;
@@ -823,6 +832,13 @@ internal sealed class MainForm : Form
         _tabs.SelectedIndexChanged += (_, _) =>
         {
             var sel = _sessions.FirstOrDefault(x => x.Page == _tabs.SelectedTab);
+            if (_tabs.SelectedTab != null && _createdHidden.Remove(_tabs.SelectedTab))
+            {
+                // its controls were created while the tab was hidden (a background reconnect): an ActiveX control made that
+                // way doesn't show its display until it's shown and repainted properly, so do that, once
+                var revive = _tabs.SelectedTab;
+                BeginInvoke(new Action(() => ReviveHiddenTab(revive)));
+            }
             sel?.Rdp?.SyncSize();
             sel?.Term?.FocusTerminal();
             sel?.Web?.FocusPage();
@@ -1350,10 +1366,7 @@ internal sealed class MainForm : Form
             host.Enter += (_, _) => _tabKeys?.Install();   // stay ahead of the RDP control's own keyboard hook
             host.FocusReleased += direction => SwitchTab(direction < 0 ? -1 : +1);   // Ctrl+Alt+Left / Right
             page.Controls.Add(host);
-            _tabs.TabPages.Add(page);
-            _tabs.Visible = true;
-            _hint.Visible = false;
-            _tabs.SelectedTab = page;
+            page = ShowSessionTab(page);   // replacing a placeholder: its own tab is reused
 
             var session = new Session { Inst = inst, Tunnel = tunnel, Rdp = host, Page = page, AsUser = asUser, AsPassword = asPassword ?? "" };
             host.Disconnected += (reason, extended) => { session.DisconnectReason = reason; session.ExtendedReason = extended; };
@@ -2044,10 +2057,7 @@ internal sealed class MainForm : Form
         page.Controls.Add(host);
         var session = new Session { Inst = inst, Kind = Protocol.Vnc, Tunnel = tunnel, Vnc = host, Page = page };
         _sessions.Add(session);
-        _tabs.TabPages.Add(page);
-        _tabs.Visible = true;
-        _hint.Visible = false;
-        _tabs.SelectedTab = page;
+        page = ShowSessionTab(page);   // replacing a placeholder: its own tab is reused
 
         host.CredentialsRequired += needUser => BeginInvoke(() => VncSignIn(session, needUser));
         host.SecurityFailure += reason => { session.VncTriedSaved = true; session.VncProblem = reason.Length > 0 ? reason : "The password wasn't accepted."; };
@@ -2178,7 +2188,11 @@ internal sealed class MainForm : Form
             }
             catch (Exception ex) { Log.Write($"Couldn't reopen {tab.Name}: {ex.Message}"); }
         }
-        if (_placeholders.Count > 0) ApplyTheme();   // the placeholders' buttons
+        if (_placeholders.Count > 0)
+        {
+            ApplyTheme();   // the placeholders' buttons
+            _ = ReconnectPlaceholdersAsync();   // the rest reconnect by themselves, a batch at a time
+        }
         if (selectPage != null && _tabs.TabPages.Contains(selectPage)) _tabs.SelectedTab = selectPage;
         if (_pendingRestore.Count > 0)
             SetStatus($"{_pendingRestore.Count} AWS tab(s) from last time reopen once you're signed in.");
@@ -2199,7 +2213,56 @@ internal sealed class MainForm : Form
             }
             catch (Exception ex) { Log.Write($"Couldn't reopen {tab.Name}: {ex.Message}"); }
         }
-        if (_placeholders.Count > 0) ApplyTheme();
+        if (_placeholders.Count > 0)
+        {
+            ApplyTheme();
+            _ = ReconnectPlaceholdersAsync();
+        }
+    }
+
+    /// <summary>
+    /// The remote tabs past the first batch: reconnected a batch at a time with a pause between (so Session Manager
+    /// isn't flooded), each in place and without changing the selected tab. One that can't reconnect yet (not signed in
+    /// to AWS, or the server isn't in the list) keeps its placeholder, saying why, and the rest carry on.
+    /// </summary>
+    private bool _reconnectingPlaceholders;
+
+    private async Task ReconnectPlaceholdersAsync()
+    {
+        // one loop at a time: it picks up every placeholder each pass, whichever restore created it
+        if (_reconnectingPlaceholders) return;
+        _reconnectingPlaceholders = true;
+        try { await ReconnectPlaceholdersLoopAsync(); }
+        finally { _reconnectingPlaceholders = false; }
+    }
+
+    private async Task ReconnectPlaceholdersLoopAsync()
+    {
+        var tried = new HashSet<TabPage>();
+        while (!IsDisposed && _placeholders.Count > 0)
+        {
+            await Task.Delay(ReconnectBatchPause);
+            // ready to connect now; AWS tabs whose server isn't in the list yet (not signed in, say) wait their turn and
+            // are picked up as soon as it is (after signing in), checked each pass
+            var waiting = _tabs.TabPages.Cast<TabPage>().Where(p => _placeholders.ContainsKey(p) && !tried.Contains(p)).ToList();
+            if (waiting.Count == 0) break;
+            var batch = waiting.Where(p => !_placeholders[p].IsAws || FindTarget(_placeholders[p]) != null).Take(ReconnectAtStart).ToList();
+            if (batch.Count == 0)
+            {
+                foreach (var p in waiting)   // say why on each one still waiting
+                    if (p.Controls.Find(PlaceholderTextName, true).FirstOrDefault() is Label text)
+                        text.Text = _aws.Count == 0 ? $"Sign in to AWS to reconnect {_placeholders[p].Name}: it reconnects by itself once you do."
+                                                    : $"{_placeholders[p].Name} isn't in the server list any more.";
+                continue;
+            }
+            Log.Write($"Restore: reconnecting {batch.Count} more tab(s); {_placeholders.Count - batch.Count} waiting after these");
+            foreach (var page in batch)
+            {
+                tried.Add(page);
+                try { await ActivatePlaceholderAsync(page, background: true); }
+                catch (Exception ex) { Log.Write($"Restore: couldn't reconnect a tab: {ex.Message}"); }
+            }
+        }
     }
 
     private async Task<TabPage> RestoreLocalAsync(TabState tab)
@@ -2254,12 +2317,14 @@ internal sealed class MainForm : Form
         var page = new TabPage(_tabs.BadgeRoom(badge) + title) { BackColor = Theme.Current.Back, Tag = ThemedTabControl.BadgeTag(badge) };
         var label = new Label
         {
-            Text = $"{title} was open last time.", AutoSize = true, UseMnemonic = false, Anchor = AnchorStyles.None,
-            ForeColor = Theme.Current.Muted, Tag = "muted", Margin = new Padding(0, 0, 0, 12),
+            Name = PlaceholderTextName, Text = $"{title.Trim()} was open last time, and reconnects automatically in a moment.",
+            AutoSize = true, UseMnemonic = false, Anchor = AnchorStyles.None, TextAlign = ContentAlignment.TopCenter,
+            MaximumSize = new Size(LogicalToDeviceUnits(520), 0), ForeColor = Theme.Current.Muted, Tag = "muted", Margin = new Padding(0, 0, 0, 12),
         };
-        var button = new Button { Text = "Reconnect", Tag = "primary", AutoSize = true, MinimumSize = new Size(140, 34), Anchor = AnchorStyles.None };
+        var button = new Button { Text = "Reconnect now", Tag = "primary", AutoSize = true, MinimumSize = new Size(140, 34), Anchor = AnchorStyles.None };
         button.Click += async (_, _) => await ActivatePlaceholderAsync(page);
         var center = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
+        center.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));   // the full width, so the block centres in the tab
         center.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
         center.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         center.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -2274,19 +2339,139 @@ internal sealed class MainForm : Form
         return page;
     }
 
-    private async Task ActivatePlaceholderAsync(TabPage page)
+    // a placeholder being reconnected: the new tab takes its place (and, in the background, isn't left selected)
+    private TabPage _replacing;
+    private bool _replacingQuietly;
+    private readonly HashSet<TabPage> _activating = new();
+
+    private const int WM_SETREDRAW = 0x000B;
+    private readonly HashSet<TabPage> _createdHidden = new();
+
+    /// <summary>
+    /// A tab whose controls were created hidden, now shown for the first time: re-show its session control (an ActiveX
+    /// control only activates its display when shown), size the remote screen to the tab and repaint it all.
+    /// </summary>
+    private void ReviveHiddenTab(TabPage page)
+    {
+        var s = _sessions.FirstOrDefault(x => x.Page == page);
+        if (s == null || page.IsDisposed) return;
+        try
+        {
+            foreach (Control c in page.Controls)
+            {
+                c.Visible = false;
+                c.Visible = true;
+            }
+            page.PerformLayout();
+            s.Rdp?.SyncSize();
+            RedrawWindow(page.Handle, IntPtr.Zero, IntPtr.Zero, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW);
+            Log.Write($"Restore: brought {s.Inst.Name}'s display up (it reconnected in the background)");
+        }
+        catch (Exception ex) { Log.Write("Restore: couldn't bring a tab's display up: " + ex.Message); }
+    }
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern IntPtr SendRedrawMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+    /// <summary>
+    /// A new remote tab (Remote Desktop, SSH, VNC) into the strip, selected. Replacing a placeholder, the connection
+    /// moves into the placeholder's own tab instead: same tab, same place, nothing inserted, removed or re-selected, so
+    /// nothing on screen is repainted but the tab's title. Returns the tab the session lives in (use it from then on).
+    /// </summary>
+    private TabPage ShowSessionTab(TabPage page)
+    {
+        var slot = _replacing;
+        if (slot == null || !_tabs.TabPages.Contains(slot))
+        {
+            _tabs.TabPages.Add(page);
+            _tabs.Visible = true;
+            _hint.Visible = false;
+            _tabs.SelectedTab = page;
+            return page;
+        }
+        // the placeholder's message and button go; the connection's controls move in (none has a window yet)
+        foreach (var old in slot.Controls.Cast<Control>().ToList()) { slot.Controls.Remove(old); old.Dispose(); }
+        foreach (var moving in page.Controls.Cast<Control>().ToList()) slot.Controls.Add(moving);
+        slot.Text = page.Text;
+        slot.Tag = page.Tag;
+        slot.BackColor = page.BackColor;
+        page.Dispose();
+        if (_tabs.SelectedTab == slot || !_replacingQuietly) { _tabs.SelectedTab = slot; return slot; }
+
+        // in the background: create the controls' windows without showing the tab (the RDP control needs one to connect)
+        _createdHidden.Add(slot);   // the first time it's shown, ReviveHiddenTab brings its display up
+        bool ready = true;
+        try
+        {
+            _ = slot.Handle;
+            foreach (Control c in slot.Controls)
+            {
+                _ = c.Handle;
+                if (c is AxHost ax && ax.GetOcx() == null) ready = false;
+            }
+        }
+        catch (Exception ex) { ready = false; Log.Write("Restore: couldn't create a tab's controls hidden: " + ex.Message); }
+        if (!ready && _tabs.IsHandleCreated)
+        {
+            // fallback: show it for an instant, with the strip's drawing paused, then back to the tab you're on
+            var keep = _tabs.SelectedTab;
+            SendRedrawMessage(_tabs.Handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
+            try
+            {
+                _tabs.SelectedTab = slot;
+                if (keep != null && keep != slot && _tabs.TabPages.Contains(keep)) _tabs.SelectedTab = keep;
+            }
+            finally
+            {
+                SendRedrawMessage(_tabs.Handle, WM_SETREDRAW, (IntPtr)1, IntPtr.Zero);
+                _tabs.Invalidate(true);
+            }
+        }
+        return slot;
+    }
+
+    private const string PlaceholderTextName = "placeholderText";
+
+    /// <summary>
+    /// Connect a placeholder's tab, in the placeholder's place. Clicked (Reconnect now): the tab is selected. In the
+    /// background (the start-up batches): the selected tab stays as it was.
+    /// </summary>
+    private async Task ActivatePlaceholderAsync(TabPage page, bool background = false)
     {
         if (!_placeholders.TryGetValue(page, out var tab)) return;
         if (tab.IsAws && FindTarget(tab) == null)
         {
-            SetStatus(_aws.Count == 0 ? $"Sign in to AWS to reconnect {tab.Name}." : $"{tab.Name} isn't in the server list any more.");
+            string why = _aws.Count == 0 ? $"Sign in to AWS to reconnect {tab.Name}." : $"{tab.Name} isn't in the server list any more.";
+            if (page.Controls.Find(PlaceholderTextName, true).FirstOrDefault() is Label text) text.Text = why;
+            if (!background) SetStatus(why);
             return;
         }
-        _placeholders.Remove(page);
-        _tabs.TabPages.Remove(page);
-        page.Dispose();
-        var opened = await RestoreRemoteAsync(tab);
-        if (opened != null && _tabs.TabPages.Contains(opened)) _tabs.SelectedTab = opened;
+        if (!_activating.Add(page)) return;   // already on its way (a click while the background pass reaches it)
+        try
+        {
+            // the new tab goes in the placeholder's place (ShowSessionTab), then the placeholder goes: nothing moves
+            bool wasSelected = _tabs.SelectedTab == page;
+            _replacing = page;
+            _replacingQuietly = background && !wasSelected;
+            TabPage opened;
+            try { opened = await RestoreRemoteAsync(tab); }
+            finally { _replacing = null; }
+            if (opened == null || !_tabs.TabPages.Contains(opened))
+            {
+                if (_placeholders.ContainsKey(page) && page.Controls.Find(PlaceholderTextName, true).FirstOrDefault() is Label failed)
+                    failed.Text = $"{tab.Name.Trim()} didn't reconnect. Reconnect now to try again.";
+                return;
+            }
+            _placeholders.Remove(page);
+            if (opened != page)
+            {
+                // it opened in a tab of its own (it was already open, say): the placeholder goes
+                if (_tabs.SelectedTab == page) _tabs.SelectedTab = opened;
+                _tabs.TabPages.Remove(page);
+                page.Dispose();
+            }
+            if (!background) _tabs.SelectedTab = opened;
+        }
+        finally { _activating.Remove(page); }
         UpdateMainTabsVisibility();
     }
 
@@ -2647,10 +2832,7 @@ internal sealed class MainForm : Form
         }
         else
         {
-            _tabs.TabPages.Add(page);
-            _tabs.Visible = true;
-            _hint.Visible = false;
-            _tabs.SelectedTab = page;
+            page = ShowSessionTab(page);   // replacing a placeholder: its own tab is reused
         }
         term.SessionEnded += _ =>
         {
@@ -2955,7 +3137,7 @@ internal sealed class MainForm : Form
         if (s.Overlay == null)
         {
             var panel = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Current.Back };
-            var label = new Label { AutoSize = true, UseMnemonic = false, ForeColor = Theme.Current.Text, Anchor = AnchorStyles.None, Margin = new Padding(0, 0, 0, 14), MaximumSize = new Size(LogicalToDeviceUnits(520), 0) };
+            var label = new Label { AutoSize = true, UseMnemonic = false, ForeColor = Theme.Current.Text, Anchor = AnchorStyles.None, Margin = new Padding(0, 0, 0, 14), MaximumSize = new Size(LogicalToDeviceUnits(520), 0), TextAlign = ContentAlignment.TopCenter };
             var retry = new Button { Text = "Reconnect now", Tag = "primary", AutoSize = true, MinimumSize = new Size(LogicalToDeviceUnits(130), LogicalToDeviceUnits(32)), Margin = new Padding(0, 0, 8, 0) };
             var close = new Button { Text = "Close tab", AutoSize = true, MinimumSize = new Size(LogicalToDeviceUnits(100), LogicalToDeviceUnits(32)) };
             retry.Click += (_, _) =>
@@ -2967,6 +3149,7 @@ internal sealed class MainForm : Form
             var buttons = new FlowLayoutPanel { AutoSize = true, Anchor = AnchorStyles.None, WrapContents = false };
             buttons.Controls.AddRange(new Control[] { retry, close });
             var center = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
+            center.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));   // the full width, so the block centres in the tab
             center.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
             center.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             center.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -3993,11 +4176,58 @@ internal sealed class MainForm : Form
         string t = (text ?? "").ToLowerInvariant();
         var p = Theme.Current;
         if (t.Contains("unreachable") || t.Contains("offline") || t.Contains("connectionlost") || t.Contains("connection lost") ||
-            t.Contains("not managed") || t.Contains("terminated") || t.Contains("failed")) return p.Bad;
+            t.Contains("not managed") || t.Contains("terminated") || t.Contains("failed") || t.Contains("disconnected") ||
+            t.Contains("ended")) return p.Bad;
         if (t.Contains("starting") || t.Contains("stopping") || t.Contains("pending") || t.Contains("rebooting") ||
-            t.Contains("shutting") || t.Contains("checking")) return p.Warn;
-        if (t.Contains("online") || t.Contains("running") || t.Contains("reachable") || t.Contains("ready")) return p.Good;
+            t.Contains("shutting") || t.Contains("checking") || t.Contains("connecting") || t.Contains("not connected")) return p.Warn;
+        if (t.Contains("online") || t.Contains("running") || t.Contains("reachable") || t.Contains("ready") || t.Contains("connected")) return p.Good;
         return null;
+    }
+
+    /// <summary>
+    /// A tab's tooltip: for a remote tab, the server's card (as in the list) with how the tab is connected and its state
+    /// first; a waiting placeholder the same; a local shell or Claude tab, what it is.
+    /// </summary>
+    private TipContent TabTipFor(TabPage page)
+    {
+        var s = _sessions.FirstOrDefault(x => x.Page == page);
+        if (s != null && s.Kind is Protocol.Rdp or Protocol.Ssh or Protocol.Vnc)
+        {
+            var tip = TipFor(s.Inst);
+            string how = (s.Kind switch { Protocol.Rdp => "Remote Desktop", Protocol.Ssh => "SSH", _ => "VNC" }) +
+                         (s.Inst.IsSaved ? "" : " through Session Manager") + (s.AsUser != null ? $", as {s.AsUser}" : "");
+            string state = TabStateText(s);
+            tip.Rows.Insert(0, ("Connection", how, null));
+            tip.Rows.Insert(1, ("This tab", state, StatusColor(state)));
+            return tip;
+        }
+        if (_placeholders.TryGetValue(page, out var waiting))
+        {
+            var target = FindTarget(waiting);
+            var tip = target != null ? TipFor(target) : new TipContent { Title = waiting.Name.Trim() };
+            tip.Rows.Insert(0, ("This tab", "Not connected yet: reconnects automatically", StatusColor("not connected")));
+            return tip;
+        }
+        if (s != null)
+            return new TipContent
+            {
+                Title = page.Text.Trim(),
+                Subtitle = s.Web != null ? "claude.ai, in a browser tab" : s.Docked ? "Local shell on this PC (docked)" : "Local shell on this PC",
+            };
+        return null;
+    }
+
+    private static string TabStateText(Session s)
+    {
+        if (s.Reconnecting) return "Reconnecting";
+        if (s.Rdp != null)
+        {
+            int state = 0;
+            try { state = s.Rdp.ConnectionState(); } catch { }
+            return state switch { 1 => "Connected", 2 => "Connecting", _ => "Disconnected" };
+        }
+        if (s.Vnc != null) return s.WasConnected ? "Connected" : "Connecting";
+        return s.Page.Text.Contains("(ended)") ? "Ended" : "Connected";   // SSH
     }
 
     private async Task InstanceActionAsync(Instance inst, InstanceActions.Action action,

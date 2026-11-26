@@ -367,6 +367,14 @@ commands by `$LASTEXITCODE`, never by stderr (9.1). Parse-check with
     `ThemedRenderer.OnRenderItemText` then draws menu text twice (+1 px) for a fake bold; labels and flat buttons get
     a Paint handler (`Theme.AttachFauxBold`, from `ApplyFont`) that repaints background + text twice when their font is
     a fake bold (checked at paint time); owner-drawn text (HoverTip, TerminalPreview) does the same itself.
+25h. **Restoring tabs: the first `ReconnectAtStart` (5) remote tabs reconnect at once; the rest start as placeholders
+    and `ReconnectPlaceholdersAsync` reconnects them in batches of 5, `ReconnectBatchPause` apart**, via
+    `ActivatePlaceholderAsync(page, background: true)` (back in the placeholder's position, selection unchanged). AWS tabs
+    whose server isn't listed (not signed in) wait and are retried each pass. Remote tabs go into the strip through
+    `ShowSessionTab`, which returns the page to use: replacing a placeholder (`_replacing`), the connection's controls
+    move into the placeholder's own TabPage (no insert/remove/re-select, so the visible page isn't repainted) and, in the
+    background, their windows are created without showing the tab (`c.Handle`; the RDP AxHost needs one for `GetOcx`).
+    Only if that fails is the tab shown for an instant under WM_SETREDRAW off. Swapping pages flashed the screen.
 25g. **The tab strip's overflow arrows are a native `msctls_updown32` child** that the theme can't reach: `ThemedTabControl`
     finds it (`ScrollArrowsRect`) and skins it with a `NativeWindow` (classic style via `SetWindowTheme`, redrawn after
     paint and mouse messages). Since 3.21.0 the tabs are `TabSizeMode.Fixed` (`UpdateTabWidths`: 240-120 px, sharing

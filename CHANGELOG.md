@@ -3,6 +3,24 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.22.0 (2026-12-11)
+
+- Tabs have tooltips: hovering a remote tab shows the same card as the server list (status, instance ID, region, tags
+  ...), with how the tab is connected (Remote Desktop, SSH or VNC, through Session Manager, as which user) and its
+  state (connected, reconnecting, disconnected) first. A tab waiting to reconnect shows its server's card too, and a
+  local shell or Claude tab says what it is.
+- Fixed: after a network drop, Remote Desktop tabs to AWS servers showed Remote Desktop's own "Reconnecting ... attempt
+  1 of 5" for minutes before Switchboard reconnected them. That built-in reconnect retries the old Session Manager
+  tunnel, which dies with the connection, so it couldn't succeed. It's off for AWS servers now: Switchboard reconnects
+  straight away with a fresh tunnel. Direct connections keep it, since their address is still good.
+- Fixed: the "connection lost, reconnecting" notice on a Remote Desktop tab sat off to the left, with its text and
+  buttons out of line. It's centred in the tab now, text and buttons alike.
+- Fixed: at start-up only the first five remote tabs reconnected; the rest waited as "Reconnect" placeholders until
+  clicked. They now all reconnect by themselves, five at a time a few seconds apart, each in its own place and without
+  changing the tab you're on. A tab that can't reconnect yet (not signed in to AWS) says so and reconnects as soon as
+  you sign in. Reconnect now on a placeholder still connects it straight away. A tab reconnects inside its
+  placeholder's own tab, so nothing moves and the screen doesn't flash.
+
 ## 3.21.0 (2026-12-09)
 
 - Tabs share the strip like a browser's: up to 240 pixels each, all narrowing together as more open (long titles

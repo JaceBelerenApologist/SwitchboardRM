@@ -20,13 +20,14 @@ internal sealed class TipContent
 /// </summary>
 internal sealed class HoverTip : IDisposable
 {
-    private readonly ListView _list;
-    private readonly Func<ListViewItem, TipContent> _content;
+    private readonly Control _list;                 // the control it serves (the server list, the tab strip ...)
+    private readonly Func<Point, object> _hitTest; // what's under the cursor there (an item, a tab), or null
+    private readonly Func<object, TipContent> _content;
     private readonly TipWindow _window = new();
     private readonly System.Windows.Forms.Timer _delay = new() { Interval = 450 };
     // while the tip shows: hide it if the cursor has left the list or Switchboard isn't the active app any more
     private readonly System.Windows.Forms.Timer _watch = new() { Interval = 250 };
-    private ListViewItem _hovered;
+    private object _hovered;
     private Form _form;
     private Point _lastMove = new(-1, -1);
 
@@ -39,11 +40,19 @@ internal sealed class HoverTip : IDisposable
         return _form != null && _form.IsHandleCreated && (fg == _form.Handle || fg == _window.WindowHandle);
     }
 
+    /// <summary>For a list: an item's card (or its ToolTipText). Windows' own list tooltips are switched off.</summary>
     public HoverTip(ListView list, Func<ListViewItem, TipContent> content = null)
+        : this(list, pt => list.GetItemAt(pt.X, pt.Y), o => o is ListViewItem item ? content?.Invoke(item) : null)
     {
-        _list = list;
+        list.ShowItemToolTips = false;   // Windows' own tooltips: replaced by this
+    }
+
+    /// <summary>For any control: hitTest says what's under the cursor (null for nothing), content gives its card.</summary>
+    public HoverTip(Control control, Func<Point, object> hitTest, Func<object, TipContent> content)
+    {
+        _list = control;
+        _hitTest = hitTest;
         _content = content;
-        _list.ShowItemToolTips = false;   // Windows' own tooltips: replaced by this
         _list.MouseMove += (_, e) => Track(e.Location);
         _list.MouseLeave += (_, _) => { if (!_list.ClientRectangle.Contains(_list.PointToClient(Cursor.Position))) Hide(); };
         _list.MouseDown += (_, _) => Hide();
@@ -88,8 +97,9 @@ internal sealed class HoverTip : IDisposable
         // ignore those, or a tip that hides would bring itself straight back
         if (location == _lastMove) return;
         _lastMove = location;
-        var item = _list.GetItemAt(location.X, location.Y);
-        if (item == _hovered) return;
+        object item = null;
+        try { item = _hitTest(location); } catch { }
+        if (Equals(item, _hovered)) return;
         _hovered = item;
         _window.HideTip();
         _delay.Stop();
@@ -103,8 +113,8 @@ internal sealed class HoverTip : IDisposable
         try { content = _content?.Invoke(_hovered); } catch (Exception ex) { Log.Write("Tooltip: " + ex.Message); }
         if (content == null)
         {
-            if (string.IsNullOrEmpty(_hovered.ToolTipText)) return;
-            content = new TipContent { Note = _hovered.ToolTipText };
+            if (_hovered is not ListViewItem { ToolTipText.Length: > 0 } item) return;
+            content = new TipContent { Note = item.ToolTipText };
         }
         if (!AppInFront()) return;   // not while a dialog or another app is in front
         _window.Present(content, Cursor.Position);
