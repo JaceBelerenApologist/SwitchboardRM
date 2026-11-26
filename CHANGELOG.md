@@ -3,6 +3,21 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.23.0 (2026-12-13)
+
+- Add disks (Server window > Disks): several disks in one go, each with its own size, type, IOPS and throughput (gp3 at
+  3,000 / 125 to start, with AWS's limits checked as you type), named after the server and drive letter ("LGCSQL16-1 -
+  E"), encrypted with a KMS key (your customer-managed keys listed, the account's EBS default or the key you used last
+  selected), tagged (the server's tags offered to copy), and attached, with each disk's cost and the total shown first.
+  Delete on termination stays off. Formatting is left to the operating system.
+- The Disks page lists unattached disks in the server's zone, with Attach.
+- AWS > Volumes and snapshots: every volume and snapshot in your regions. Volumes: search and filters (unattached, gp2,
+  unencrypted, no recent snapshot), sizes and estimated costs with totals, and New volumes, Modify, Attach, Detach,
+  Snapshot now, Name and tags, and Delete (unattached only, optionally after a final snapshot). Snapshots: what each
+  came from, which images need it, and New volume from snapshot, Copy to another region, Name and tags, and Delete
+  (refused while an image needs it). Cleanup: unattached volumes newest first (for disks made by mistake) and
+  snapshots whose volume is gone, with what they cost.
+
 ## 3.22.1 (2026-12-12)
 
 - Fixed: a tab's tooltip stayed up after the mouse moved off the tab onto the session below it, until clicked. It now

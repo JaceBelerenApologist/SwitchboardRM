@@ -104,6 +104,8 @@ internal sealed class AppSettings
     public string Profile { get; set; } = "";   // empty until the first profile is picked or added
     public string Username { get; set; } = "";
     public List<string> ScanRegions { get; set; } = new() { "ca-central-1", "ca-west-1" };
+    /// <summary>The KMS key last used for new disks, per region ("" = AWS managed); offered first next time.</summary>
+    public Dictionary<string, string> LastKmsKeys { get; set; } = new();
     public bool WindowsOnly { get; set; } = true;
     public bool DarkMode { get; set; }   // from before ThemeMode; still kept in step for older versions
 

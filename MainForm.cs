@@ -399,6 +399,7 @@ internal sealed class MainForm : Form
 
         var aws = new ToolStripMenuItem("&AWS");
         aws.DropDownItems.Add(new ToolStripMenuItem("&New server ...", null, async (_, _) => await OpenNewServerAsync(null)));
+        aws.DropDownItems.Add(new ToolStripMenuItem("&Volumes and snapshots ...", null, async (_, _) => await OpenVolumesAsync()));
         aws.DropDownItems.Add(new ToolStripSeparator());
         aws.DropDownItems.Add(new ToolStripMenuItem("&Sign in...", null, async (_, _) => await SignInAsync()));
         aws.DropDownItems.Add(new ToolStripMenuItem("Sign &out", null, async (_, _) => await SignOutNowAsync()));
@@ -1903,6 +1904,16 @@ internal sealed class MainForm : Form
     // ---------------------------------------------------------------- server window
 
     /// <summary>The Server window for an EC2 server (details, screenshot and log, tags, protection ...).</summary>
+    /// <summary>AWS > Volumes and snapshots: every EBS volume and snapshot in the scanned regions.</summary>
+    private async Task OpenVolumesAsync()
+    {
+        if (string.IsNullOrEmpty(Profile)) { SetStatus("Choose an AWS profile and sign in first."); return; }
+        if (!await EnsureSignedInAsync("listing volumes")) { SetStatus("Not signed in to AWS."); return; }
+        var regions = _settings.ScanRegions.Count > 0 ? _settings.ScanRegions : new List<string> { "us-east-1" };
+        using var f = new VolumesForm(Profile, regions, _settings);
+        f.ShowDialog(this);
+    }
+
     private async Task ManageServerAsync(Instance inst)
     {
         if (string.IsNullOrEmpty(Profile)) { SetStatus("Choose an AWS profile and sign in first."); return; }

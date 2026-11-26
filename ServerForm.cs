@@ -54,13 +54,13 @@ internal sealed class ServerForm : Form
     private string _typesFor = "";
     // disks
     private readonly ListView _disks = new() { Width = PageWidth, Height = 150, View = View.Details, FullRowSelect = true, MultiSelect = false, HideSelection = false };
+    private readonly ListView _unattached = new() { Width = PageWidth, Height = 110, View = View.Details, FullRowSelect = true, MultiSelect = false, HideSelection = false };
     private readonly NumericUpDown _growTo = new() { Minimum = 1, Maximum = 65536, Width = 90 };
     private readonly ComboBox _growType = new() { Width = 130, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly ThemedCheckBox _extend = new() { Text = "Then extend the partition and file system inside the OS (through Systems Manager)", AutoSize = true, Checked = true, Margin = new Padding(0, 6, 0, 0) };
     private readonly NumericUpDown _addSize = new() { Minimum = 1, Maximum = 16384, Value = 100, Width = 90 };
     private readonly ComboBox _addType = new() { Width = 100, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly ThemedCheckBox _addEncrypted = new() { Text = "Encrypted", AutoSize = true, Checked = true, Margin = new Padding(12, 6, 0, 0) };
-    private readonly ThemedCheckBox _addFormat = new() { Text = "Then initialize and format it in Windows (GPT, NTFS, next free drive letter)", AutoSize = true, Checked = true, Margin = new Padding(0, 6, 0, 0) };
     private readonly TextBox _diskOutput = Readout(PageWidth, 90);
     private bool _busy;
     // network
@@ -129,6 +129,7 @@ internal sealed class ServerForm : Form
         _disks.Columns.Add("Encrypted", 76);
         _disks.Columns.Add("Volume", 180);
         _disks.SelectedIndexChanged += (_, _) => DiskSelected();
+        foreach (var (title, width) in new[] { ("Name", 200), ("Size", 70), ("Type", 60), ("Created", 130), ("Volume", 180) }) _unattached.Columns.Add(title, width);
         _newType.SelectedIndexChanged += (_, _) => UpdateTypeDiff();
         _newType.TextChanged += (_, _) => UpdateTypeDiff();
         _diskOutput.Font = _backupOutput.Font = _runOutput.Font = _patchInfo.Font = _apps.Font = new Font("Consolas", 9F);
@@ -210,6 +211,7 @@ internal sealed class ServerForm : Form
         UpdateShotTimer();
         if (index == 1 && _autoShot.Checked) await ScreenshotAsync(quiet: true);
         if (index == 4) await LoadTypesAsync();
+        if (index == 5) await LoadUnattachedAsync();
         if (index == 6) await LoadNetworkAsync();
         if (index == 7) await LoadBackupsAsync();
         if (index == 8) FillRunTargets();
@@ -312,8 +314,10 @@ internal sealed class ServerForm : Form
     {
         var grow = new Button { Text = "Grow disk ...", Tag = "primary", AutoSize = true, MinimumSize = new Size(120, 30), Margin = new Padding(12, 0, 0, 0) };
         grow.Click += async (_, _) => await GrowDiskAsync();
-        var add = new Button { Text = "Add disk ...", AutoSize = true, MinimumSize = new Size(120, 30), Margin = new Padding(12, 0, 0, 0) };
-        add.Click += async (_, _) => await AddDiskAsync();
+        var add = new Button { Text = "Add disks ...", Tag = "primary", AutoSize = true, MinimumSize = new Size(120, 30), Margin = new Padding(0, 4, 0, 0) };
+        add.Click += async (_, _) => await AddDisksAsync();
+        var attach = new Button { Text = "Attach the selected disk", AutoSize = true, MinimumSize = new Size(170, 30), Margin = new Padding(0, 8, 0, 0) };
+        attach.Click += async (_, _) => await AttachUnattachedAsync();
         var detach = new Button { Text = "Detach the selected disk ...", AutoSize = true, MinimumSize = new Size(190, 30), Margin = new Padding(0, 8, 0, 0) };
         detach.Click += async (_, _) => await DetachDiskAsync();
         return Page(
@@ -323,9 +327,13 @@ internal sealed class ServerForm : Form
                 new Label { Text = "GiB", AutoSize = true, Margin = new Padding(4, 6, 12, 0) }, _growType, grow),
             _extend,
             Note("The disk grows while the server runs. Disks can only grow, and AWS allows one change per disk every 6 hours."),
-            Heading("Add a disk"),
-            Row(_addSize, new Label { Text = "GiB", AutoSize = true, Margin = new Padding(4, 6, 12, 0) }, _addType, _addEncrypted, add),
-            _addFormat,
+            Heading("Add disks"),
+            Note("One or more new disks, each its own size, type and performance; encrypted with your KMS key, tagged, named " +
+                 "\"Server - Drive\" and attached here. Formatting is left to you, in the operating system."),
+            add,
+            Heading("Unattached disks in this zone"),
+            Note($"Volumes in this server's availability zone that aren't attached to anything (all volumes: AWS > Volumes and snapshots)."),
+            _unattached, attach,
             Heading("Result"), _diskOutput);
     }
 
@@ -692,7 +700,6 @@ internal sealed class ServerForm : Form
             if (v.VolumeId == selected || (selected == null && _disks.Items.Count == 1)) item.Selected = true;
         }
         _disks.EndUpdate();
-        _addFormat.Visible = _details.IsWindows;
         DiskSelected();
     }
 
@@ -750,38 +757,60 @@ internal sealed class ServerForm : Form
         finally { _busy = false; UseWaitCursor = false; }
     }
 
-    private async Task AddDiskAsync()
+    /// <summary>Add disks: several at once (AddDisksForm), attached here.</summary>
+    private async Task AddDisksAsync()
     {
         if (_busy || _details == null) return;
-        int size = (int)_addSize.Value;
-        string type = _addType.SelectedItem as string ?? "gp3";
-        bool format = _details.IsWindows && _addFormat.Checked && _details.State == "running";
-        if (MessageBox.Show(this, $"Add a {size} GiB {type} disk to {_details.Name}?" + (format ? " It's then initialized and formatted in Windows." : ""),
-                "Add disk", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+        using var f = AddDisksForm.ForServer(_profile, _region, _settings, _details);
+        f.ShowDialog(this);
+        if (f.CreatedVolumes.Count == 0) return;
+        Changed = true;
+        Output($"{f.CreatedVolumes.Count} disk(s) created: {string.Join(", ", f.CreatedVolumes)}. Bring them online in the operating system.");
+        await LoadDetailsAsync();
+        await LoadUnattachedAsync();
+    }
 
+    private List<VolumeRow> _unattachedRows = new();
+
+    /// <summary>Unattached (available) volumes in this server's zone.</summary>
+    private async Task LoadUnattachedAsync()
+    {
+        if (_details == null) return;
+        try
+        {
+            var all = await VolumeAdmin.VolumesAsync(_profile, new[] { _region }, _cts.Token);
+            _unattachedRows = all.Where(v => !v.Attached && v.State == "available" && v.Zone == _details.Zone)
+                                 .OrderByDescending(v => v.Created).ToList();
+            _unattached.BeginUpdate();
+            _unattached.Items.Clear();
+            foreach (var v in _unattachedRows)
+                _unattached.Items.Add(new ListViewItem(new[] { v.Name, $"{v.SizeGb:N0} GiB", v.Type, v.Created == DateTime.MinValue ? "" : v.Created.ToString("yyyy-MM-dd HH:mm"), v.Id }) { Tag = v });
+            _unattached.EndUpdate();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { Status("Couldn't list the unattached disks: " + Aws.Describe(ex), accent: true); }
+    }
+
+    private async Task AttachUnattachedAsync()
+    {
+        if (_busy || _details == null) return;
+        if (_unattached.SelectedItems.Count == 0 || _unattached.SelectedItems[0].Tag is not VolumeRow v) { Status("Select an unattached disk first.", accent: true); return; }
         _busy = true;
         UseWaitCursor = true;
         try
         {
-            string volumeId = await ServerAdmin.AddDiskAsync(_profile, _region, _details, size, type, _addEncrypted.Checked,
-                new Progress<string>(m => Status(m)), _cts.Token);
-            Output($"{volumeId} ({size} GiB {type}) attached.");
-            if (format)
-            {
-                Status("Initializing and formatting the disk in Windows ...");
-                try
-                {
-                    string result = await ServerAdmin.RunScriptAsync(_profile, _region, _instanceId, true, ServerAdmin.FormatNewDiskScript(volumeId), _cts.Token);
-                    Output($"{volumeId} ({size} GiB {type}) attached.\n{result}");
-                }
-                catch (Exception ex) { Output($"{volumeId} attached, but it wasn't formatted: {Aws.Describe(ex)}\nSet it up in Disk Management."); }
-            }
+            var used = new HashSet<string>(_details.Volumes.Select(d => d.Device), StringComparer.OrdinalIgnoreCase);
+            string device = VolumeAdmin.NextDevice(_details.IsWindows, used);
+            Status($"Attaching {v.Label} as {device} ...");
+            await VolumeAdmin.AttachAsync(_profile, _region, v.Id, _instanceId, device, _cts.Token);
+            Output($"{v.Label} attached as {device}. Bring it online in the operating system.");
             Changed = true;
             await LoadDetailsAsync();
+            await LoadUnattachedAsync();
             Status("Done.");
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { Status("The disk wasn't added: " + Aws.Describe(ex), accent: true); }
+        catch (Exception ex) { Status("The disk wasn't attached: " + Aws.Describe(ex), accent: true); }
         finally { _busy = false; UseWaitCursor = false; }
     }
 

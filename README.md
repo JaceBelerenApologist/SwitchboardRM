@@ -50,6 +50,9 @@ can reach it, without opening the AWS console.
   extended inside Windows or Linux; add; detach); network (security groups, secondary IPs, instance profile); images
   and snapshots (create, and attach a copy of a snapshot to recover files); Run command (on several servers at once);
   patches and the Systems Manager agent (scan, install, installed applications).
+- **Volumes and snapshots** (AWS menu): every EBS volume and snapshot in your regions, with costs, filters and cleanup
+  of unattached volumes and orphaned snapshots; create several disks at once for a server (each its own size and
+  performance, encrypted with your KMS key, tagged and attached), modify, attach, detach, snapshot, copy and delete.
 - **New server** wizard: AWS's current Windows and Linux images or your own, instance type with on-demand prices, data
   disks, full network control (specific private IPs, several network interfaces, IPv6), protections, metadata and
   user data, and a costed review before launch. "New server like this one" copies an existing server's settings.
@@ -88,6 +91,7 @@ can reach it, without opening the AWS console.
 | Start, stop, reboot, terminate | `ec2:StartInstances`, `ec2:StopInstances`, `ec2:RebootInstances`, `ec2:TerminateInstances` |
 | Server window | `ec2:Describe*`, `ec2:GetConsoleScreenshot`, `ec2:GetConsoleOutput`, `ec2:CreateTags`, `ec2:DeleteTags`, `ec2:ModifyInstanceAttribute`, `ec2:Monitor/UnmonitorInstances`, `ec2:ModifyVolume`, `ec2:CreateVolume`, `ec2:AttachVolume`, `ec2:DetachVolume`, `ec2:ModifyNetworkInterfaceAttribute`, `ec2:Assign/UnassignPrivateIpAddresses`, `ec2:Associate/Replace/DisassociateIamInstanceProfile`, `ec2:CreateImage`, `ec2:CreateSnapshots`, `iam:PassRole` |
 | Run command, patches, inventory | `ssm:SendCommand`, `ssm:GetCommandInvocation`, `ssm:DescribeInstancePatchStates`, `ssm:DescribeInstancePatches`, `ssm:ListInventoryEntries` |
+| Volumes and snapshots | `ec2:DescribeVolumes`, `ec2:DescribeSnapshots`, `ec2:DescribeImages`, `ec2:CreateVolume`, `ec2:AttachVolume`, `ec2:DetachVolume`, `ec2:ModifyVolume`, `ec2:CreateSnapshot`, `ec2:CopySnapshot`, `ec2:DeleteVolume`, `ec2:DeleteSnapshot`, `ec2:CreateTags`, `ec2:DeleteTags`, `ec2:GetEbsDefaultKmsKeyId`, `kms:ListAliases` and `kms:DescribeKey` (to list keys), and use of the key for EBS (`kms:CreateGrant`, `kms:GenerateDataKeyWithoutPlaintext`, `kms:Decrypt`) |
 | New server | `ec2:RunInstances`, `ec2:Describe*`, `ssm:GetParameters*` (AWS's public image list), `iam:ListInstanceProfiles`, `iam:ListAttachedRolePolicies`, `iam:PassRole`, `pricing:GetProducts` (prices; optional) |
 
 Anything the role isn't allowed to do simply fails with AWS's message; the rest keeps working.
