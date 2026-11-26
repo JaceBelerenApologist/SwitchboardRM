@@ -54,7 +54,7 @@ internal sealed class HoverTip : IDisposable
         _hitTest = hitTest;
         _content = content;
         _list.MouseMove += (_, e) => Track(e.Location);
-        _list.MouseLeave += (_, _) => { if (!_list.ClientRectangle.Contains(_list.PointToClient(Cursor.Position))) Hide(); };
+        _list.MouseLeave += (_, _) => { if (!StillOverHovered()) Hide(); };
         _list.MouseDown += (_, _) => Hide();
         _list.MouseWheel += (_, _) => Hide();
         _list.KeyDown += (_, _) => Hide();
@@ -62,9 +62,9 @@ internal sealed class HoverTip : IDisposable
         _delay.Tick += (_, _) => { _delay.Stop(); Show(); };
         _watch.Tick += (_, _) =>
         {
-            bool overList = _list.IsHandleCreated && _list.Visible &&
-                            _list.RectangleToScreen(_list.ClientRectangle).Contains(Cursor.Position);
-            if (!overList || !AppInFront()) Hide();
+            // still over the same item (or tab)? Not just "over the control": a tab strip's control also covers the page
+            // below the tabs, and the mouse there goes to the page, so the strip would never see it leave
+            if (!StillOverHovered() || !AppInFront()) Hide();
         };
         // a dialog opening, another app coming forward, minimizing or going to the tray: the main window stops being
         // the active one, and the tip goes (it's always-on-top, so it would otherwise stay over everything)
@@ -72,6 +72,17 @@ internal sealed class HoverTip : IDisposable
         _list.ParentChanged += (_, _) => WatchForm();
         _list.VisibleChanged += (_, _) => { if (!_list.Visible) Hide(); };
         WatchForm();
+    }
+
+    /// <summary>The cursor is still over the control and over the same thing the tip is about.</summary>
+    private bool StillOverHovered()
+    {
+        if (_hovered == null || !_list.IsHandleCreated || !_list.Visible) return false;
+        var pt = _list.PointToClient(Cursor.Position);
+        if (!_list.ClientRectangle.Contains(pt)) return false;
+        object under = null;
+        try { under = _hitTest(pt); } catch { }
+        return Equals(under, _hovered);
     }
 
     private void WatchForm()

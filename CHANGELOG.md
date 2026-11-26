@@ -3,6 +3,11 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.22.1 (2026-12-12)
+
+- Fixed: a tab's tooltip stayed up after the mouse moved off the tab onto the session below it, until clicked. It now
+  goes as soon as the cursor isn't over that tab, whatever it's over instead.
+
 ## 3.22.0 (2026-12-11)
 
 - Tabs have tooltips: hovering a remote tab shows the same card as the server list (status, instance ID, region, tags
