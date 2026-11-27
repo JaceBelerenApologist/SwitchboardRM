@@ -128,6 +128,8 @@ internal sealed class AppSettings
     public bool StylePowerShell { get; set; } = true;
     /// <summary>Shell for Ctrl+T and the toolbar's terminal button: "cmd", "powershell", "pwsh", ... Empty = automatic.</summary>
     public string DefaultShell { get; set; } = "";
+    /// <summary>Folder Claude Code starts in; its subfolders are offered as projects (Claude Code in). Empty = the user folder.</summary>
+    public string ProjectsFolder { get; set; } = "";
 
     /// <summary>Whether to show the dark look right now (ThemeMode, or Windows' setting for "System").</summary>
     [System.Text.Json.Serialization.JsonIgnore]

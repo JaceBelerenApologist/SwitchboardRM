@@ -685,6 +685,7 @@ internal sealed class SettingsForm : Form
     private readonly ThemedCheckBox _chkDockNew = new()
     { Text = "Open new terminals docked", AutoSize = true, Margin = new Padding(0, 12, 0, 2) };
     private readonly TextBox _txtSshKey = new() { Width = 380 };
+    private readonly TextBox _txtProjects = new() { Width = 380 };
     private readonly ThemedCheckBox _chkRestoreTabs = new()
     { Text = "Restore my tabs when Switchboard starts", AutoSize = true, Margin = new Padding(0, 8, 0, 2) };
     private readonly ThemedCheckBox _chkRestoreOutput = new()
@@ -729,6 +730,25 @@ internal sealed class SettingsForm : Form
         _chkDockNew.Checked = _settings.DockNewTerminals;
         _chkDockNew.CheckedChanged += (_, _) => { _settings.DockNewTerminals = _chkDockNew.Checked; _settings.Save(); };
 
+        // Claude Code's projects folder
+        _txtProjects.Text = _settings.ProjectsFolder ?? "";
+        _txtProjects.PlaceholderText = "Not set: Claude Code starts in your user folder";
+        _txtProjects.TextChanged += (_, _) => { _settings.ProjectsFolder = _txtProjects.Text.Trim(); _settings.Save(); };
+        var browseProjects = Btn("Browse ...");
+        browseProjects.Click += (_, _) =>
+        {
+            using var dlg = new FolderBrowserDialog
+            {
+                Description = "Folder that holds your projects",
+                UseDescriptionForTitle = true,
+                SelectedPath = Directory.Exists(_txtProjects.Text.Trim()) ? _txtProjects.Text.Trim()
+                    : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            };
+            if (dlg.ShowDialog(this) == DialogResult.OK) _txtProjects.Text = dlg.SelectedPath;
+        };
+        var clearProjects = Btn("Clear");
+        clearProjects.Click += (_, _) => _txtProjects.Text = "";
+
         string ssh = Tools.Ssh;
         page.Controls.AddRange(new Control[]
         {
@@ -745,6 +765,14 @@ internal sealed class SettingsForm : Form
             Muted("New shells and SSH sessions open in the docked panel under the tabs instead of in a tab of their own. " +
                   "Move back to a tab still works on any of them."),
             Muted("Terminal font and text size, and restoring tabs at start-up, are under Appearance."),
+
+            Heading("Claude Code projects folder"),
+            Muted("The folder that holds your projects, one folder each. Claude Code starts there, and Claude Code in " +
+                  "(next to Claude Code in the shell menus) lists its folders, so a session can start straight in a " +
+                  "project, with that project's CLAUDE.md, memory and permissions. The tab is named after the project, " +
+                  "and comes back in it next time. Leave blank to start in your user folder."),
+            _txtProjects,
+            ButtonRow(browseProjects, clearProjects),
 
             Heading("SSH"),
             Muted("Linux servers open in an SSH terminal tab. AWS servers are reached through the same Session Manager " +

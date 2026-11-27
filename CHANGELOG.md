@@ -3,6 +3,16 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
+## 3.25.0 (2026-11-27)
+
+- Claude Code projects folder (Settings > Terminal & SSH): point it at the folder that holds your projects. Claude Code
+  starts there instead of your user folder, and a new Claude Code in menu, next to Claude Code wherever shells are
+  offered, lists its folders, so a session can start straight in a project, with that project's CLAUDE.md, memory and
+  permissions. The tab is named after the project. If the folder isn't there (moved, or a drive that isn't connected),
+  Claude Code starts in your user folder and the status bar says why.
+- Restored Claude Code tabs come back in the folder they started in, so they pick up that project's last conversation.
+  Other local shells still start in your user folder.
+
 ## 3.24.0 (2026-11-27)
 
 - Pop out to own window: right-click any tab (Remote Desktop, SSH, VNC, a local shell, Claude Code, claude.ai, docked

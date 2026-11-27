@@ -18,6 +18,7 @@ internal sealed class Session
     public VncHost Vnc;          // VNC tabs (noVNC through a local relay)
     public bool VncTriedSaved;   // the saved VNC password was already offered this time
     public string VncProblem = "";
+    public string StartFolder;   // local shells: the folder it started in (saved with the tab)
     public bool Docked;          // in the docked-terminal panel under the tabs, not a tab of its own (popped out: where it goes back to)
     public TabPage Page;
     public PopoutForm Popout;    // in a window of its own: the controls are in Popout.Body, Page is out of the strips
@@ -1841,10 +1842,48 @@ internal sealed class MainForm : Form
         items.Add(claudeCode != null
             ? new ToolStripMenuItem("Claude Code", ShellIcons.For(claudeCode), async (_, _) => await OpenShellAsync(claudeCode, docked))
             : new ToolStripMenuItem("Install Claude Code ...", null, async (_, _) => await InstallClaudeCodeAsync(docked)));
+        if (claudeCode != null && ProjectFolders() is { Count: > 0 } projects)
+        {
+            // Claude Code in > one entry per project (subfolder of the projects folder), read each time the menu opens
+            var inMenu = new ToolStripMenuItem("Claude Code in");
+            foreach (var dir in projects)
+            {
+                string folder = dir;
+                inMenu.DropDownItems.Add(new ToolStripMenuItem(Path.GetFileName(folder).Replace("&", "&&"), null,
+                    async (_, _) => await OpenShellAsync(claudeCode, docked, folder: folder)));
+            }
+            items.Add(inMenu);
+        }
         items.Add(new ToolStripMenuItem("Claude (claude.ai)", null, async (_, _) => await OpenClaudeWebAsync()));
 
         Theme.ApplyMenu(owner);
         if (refresh) RefreshShellMenu(items, owner, docked, withConnect);
+    }
+
+    /// <summary>The projects folder's subfolders (not hidden, system or dot folders), by name; empty when it isn't set or found.</summary>
+    private List<string> ProjectFolders()
+    {
+        string root = _settings.ProjectsFolder;
+        if (string.IsNullOrWhiteSpace(root)) return new();
+        try
+        {
+            return new DirectoryInfo(root).EnumerateDirectories()
+                .Where(d => !d.Name.StartsWith('.') && (d.Attributes & (FileAttributes.Hidden | FileAttributes.System)) == 0)
+                .OrderBy(d => d.Name, StringComparer.CurrentCultureIgnoreCase)
+                .Select(d => d.FullName).ToList();
+        }
+        catch (Exception ex) { Log.Write("Couldn't list the projects folder: " + ex.Message); return new(); }
+    }
+
+    private static bool PathsEqual(string a, string b)
+    {
+        if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b)) return false;
+        try
+        {
+            return string.Equals(Path.GetFullPath(a).TrimEnd('\\', '/'), Path.GetFullPath(b).TrimEnd('\\', '/'),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
     }
 
     /// <summary>A WSL distribution installed or removed since the last look: rebuild the menu if it's still open.</summary>
@@ -2332,6 +2371,7 @@ internal sealed class MainForm : Form
             if (s.Inst.Type == "claude-code-install") return null;   // the installer isn't something to reopen
             tab.Kind = "shell";
             tab.ShellId = s.Inst.Type;
+            tab.Folder = s.StartFolder;
         }
         else
         {
@@ -2473,7 +2513,10 @@ internal sealed class MainForm : Form
         }
         else shell = Shells.Find(tab.ShellId);
         if (shell == null) { Log.Write($"Restore: {tab.Name} wasn't reopened ({tab.ShellId} isn't available now)"); return null; }
-        await OpenShellAsync(shell, tab.Docked, SessionRestore.ReadScrollback(tab));
+        // the folder it started in, so Claude Code's --continue picks up that folder's last conversation. Tabs saved
+        // before 3.25.0 have none: they started in the user folder
+        string folder = string.IsNullOrEmpty(tab.Folder) ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) : tab.Folder;
+        await OpenShellAsync(shell, tab.Docked, SessionRestore.ReadScrollback(tab), folder);
         return _sessions.LastOrDefault(x => x.Kind == Protocol.Local && x.Web == null)?.Page;
     }
 
@@ -2917,15 +2960,31 @@ internal sealed class MainForm : Form
         catch (Exception ex) { Log.Write("Couldn't open " + url + ": " + ex.Message); }
     }
 
-    /// <summary>Open a local shell in a new tab, starting in the user folder.</summary>
+    /// <summary>
+    /// Open a local shell in a new tab, starting in the user folder; Claude Code starts in the projects folder
+    /// (Settings > Terminal & SSH) when one is set.
+    /// </summary>
     /// <param name="replay">Restored output from the last session, shown dimmed above the new shell.</param>
-    private async Task OpenShellAsync(ShellInfo shell, bool docked = false, string replay = null)
+    /// <param name="folder">Folder to start in instead (a project, or a restored tab's); a Claude Code tab in a project is named after it.</param>
+    private async Task OpenShellAsync(ShellInfo shell, bool docked = false, string replay = null, string folder = null)
     {
         docked |= _settings.DockNewTerminals;   // Settings > Terminal & SSH > Open new terminals docked
-        // "PowerShell", then "PowerShell 2", "PowerShell 3" ... for more of the same kind
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        bool claude = shell.Id == "claude-code";
+        if (folder == null && claude && !string.IsNullOrWhiteSpace(_settings.ProjectsFolder)) folder = _settings.ProjectsFolder;
+        folder ??= home;
+        string missing = null;
+        if (!Directory.Exists(folder)) { missing = folder; folder = home; }
+
+        // "PowerShell", then "PowerShell 2", "PowerShell 3" ... for more of the same kind. Claude Code in a project
+        // is named after its folder ("SwitchboardRM"); its Claude icon says what it is
+        string baseName = shell.Name;
+        if (claude && !PathsEqual(folder, home) && !PathsEqual(folder, _settings.ProjectsFolder)
+            && Path.GetFileName(folder.TrimEnd('\\', '/')) is { Length: > 0 } project)
+            baseName = project;
         var used = new HashSet<string>(_sessions.Where(x => x.Kind == Protocol.Local).Select(x => x.Inst.Name));
-        string name = shell.Name;
-        for (int n = 2; used.Contains(name); n++) name = $"{shell.Name} {n}";
+        string name = baseName;
+        for (int n = 2; used.Contains(name); n++) name = $"{baseName} {n}";
 
         var inst = new Instance { Name = name, Id = "shell:" + Guid.NewGuid().ToString("N"), Type = shell.Id };
         var page = new TabPage(ThemedTabControl.IconSpace + name) { BackColor = Theme.Current.Back, Tag = ThemedTabControl.ShellTag };
@@ -2939,7 +2998,7 @@ internal sealed class MainForm : Form
             if (ended != null) CloseSession(ended);
         });
         page.Controls.Add(term);
-        var session = new Session { Inst = inst, Kind = Protocol.Local, Term = term, Page = page, Docked = docked };
+        var session = new Session { Inst = inst, Kind = Protocol.Local, Term = term, Page = page, Docked = docked, StartFolder = folder };
         _sessions.Add(session);
         if (docked)
         {
@@ -2954,13 +3013,12 @@ internal sealed class MainForm : Form
             _hint.Visible = false;
             _tabs.SelectedTab = page;
         }
-        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         term.SessionEnded += _ => page.Text = ThemedTabControl.IconSpace + name + " (ended)";
         term.ReconnectRequested += () =>
         {
             page.Text = ThemedTabControl.IconSpace + name;
             term.Reset();
-            term.Run(ShellCommandLine(shell), home, ShellEnvironment());
+            term.Run(ShellCommandLine(shell), folder, ShellEnvironment());
         };
 
         try
@@ -2979,9 +3037,12 @@ internal sealed class MainForm : Form
             return;
         }
         if (!string.IsNullOrEmpty(replay)) term.Replay(replay, _restoredFrom);
-        term.Run(ShellCommandLine(shell), home, ShellEnvironment());
+        term.Run(ShellCommandLine(shell), folder, ShellEnvironment());
         term.FocusTerminal();
-        SetStatus($"Opened {name}" + (Profile.Length > 0 ? $" (AWS_PROFILE={Profile})" : ""));
+        SetStatus(missing != null
+            ? $"{missing} isn't there (moved, renamed, or on a drive that isn't connected), so {name} started in your user folder."
+            : $"Opened {name}" + (claude && !PathsEqual(folder, home) ? $" in {folder}" : "") +
+              (Profile.Length > 0 ? $" (AWS_PROFILE={Profile})" : ""));
     }
 
     // ---------------------------------------------------------------- SSH

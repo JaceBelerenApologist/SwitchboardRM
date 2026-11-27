@@ -7,6 +7,7 @@ internal sealed class TabState
 {
     public string Kind { get; set; } = "";        // "shell", "claude-web", "rdp", "ssh", "vnc"
     public string ShellId { get; set; } = "";     // shell: Shells id, or "claude-code"
+    public string Folder { get; set; }            // shell: the folder it started in (none before 3.25.0: the user folder)
     public string InstanceId { get; set; } = "";  // AWS server
     public string Region { get; set; } = "";
     public string SavedId { get; set; } = "";     // saved connection

@@ -232,6 +232,11 @@ first on `PATH`. PowerShell tabs get the colour scheme's styling via `-NoExit -E
 profile; replaces only PowerShell's default prompt). Docked panel (shared, collapsible strip) holds terminals only.
 Claude Code is just another terminal tab (`claude.exe` from PATH or `%USERPROFILE%\.local\bin`, or npm `claude.cmd`
 via `cmd /c`); if missing, the menu offers Anthropic's installer (`irm https://claude.ai/install.ps1 | iex`) in a tab.
+Since 3.25.0 Claude Code (only) starts in `ProjectsFolder` (Settings > Terminal & SSH) when set, and *Claude Code in*
+lists its subfolders (read each time the menu opens; hidden, system and dot folders skipped); a project tab is named
+after its folder. The start folder is `Session.StartFolder`, saved as `TabState.Folder`, so a restored Claude Code tab
+`--continue`s in the same folder (tabs saved before 3.25.0 have none: user folder). A missing folder falls back to
+the user folder with a status-bar note.
 
 ### 7.6 Keyboard
 Main window: Enter connect, Ctrl+T new shell, Ctrl+Shift+T new shell (also from terminals), Ctrl+L list, Ctrl+1/2
