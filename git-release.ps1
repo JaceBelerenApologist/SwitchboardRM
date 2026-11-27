@@ -72,7 +72,7 @@ $tag = "v$Version"
 # ---------------------------------------------------------------- changelog notes for this version
 $notes = ''
 if (Test-Path CHANGELOG.md) {
-    $lines = Get-Content CHANGELOG.md
+    $lines = Get-Content CHANGELOG.md -Encoding UTF8   # Windows PowerShell would otherwise read it as ANSI and mangle non-ASCII characters
     $start = -1
     for ($i = 0; $i -lt $lines.Count; $i++) {
         if ($lines[$i] -match ('^##\s+' + [regex]::Escape($Version) + '(\s|$)')) { $start = $i; break }
@@ -130,7 +130,8 @@ if (-not $Yes) {
 # ---------------------------------------------------------------- commit, catch up, push
 if ($staged.Count) {
     $msgFile = [System.IO.Path]::GetTempFileName()
-    Set-Content -Path $msgFile -Value ($subject + $(if ($notes) { "`n`n" + $notes } else { '' })) -Encoding UTF8
+    # UTF-8 without a byte-order mark: Set-Content -Encoding UTF8 adds one, and git keeps it in the message
+    [System.IO.File]::WriteAllText($msgFile, ($subject + $(if ($notes) { "`n`n" + $notes } else { '' })), (New-Object System.Text.UTF8Encoding($false)))
     Invoke-Git commit -q -F $msgFile | Out-Null
     Remove-Item $msgFile
     Write-Host "Committed: $subject"
