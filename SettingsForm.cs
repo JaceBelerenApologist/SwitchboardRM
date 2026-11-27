@@ -21,7 +21,19 @@ internal sealed class SettingsForm : Form
     /// <summary>The regions to scan were changed.</summary>
     public bool RegionsChanged { get; private set; }
 
-    private const int ContentWidth = 500;
+    // the width text wraps at, scaled to the screen's scaling (the text grows with it, so fixed pixels squeezed it);
+    // static so the field initializers below can use it (the window opens on the primary screen's scaling)
+    private static readonly int ContentWidth = AtScreenScale(560);
+
+    private static int AtScreenScale(int pixelsAt100)
+    {
+        try
+        {
+            using var g = Graphics.FromHwnd(IntPtr.Zero);
+            return (int)Math.Round(pixelsAt100 * g.DpiX / 96.0);
+        }
+        catch { return pixelsAt100; }
+    }
 
     private readonly AppSettings _settings;
     private readonly Action _appearanceChanged; // saves and restyles every window
@@ -91,8 +103,11 @@ internal sealed class SettingsForm : Form
         Text = "Settings";
         if (AppIcon.Icon != null) Icon = AppIcon.Icon;
         Font = new Font("Segoe UI", 9.5F);
-        ClientSize = new Size(780, 600);
-        MinimumSize = new Size(640, 480);
+        // big enough that every page's widest line fits without a sideways scroll bar, at any scaling
+        ClientSize = new Size(LogicalToDeviceUnits(900), LogicalToDeviceUnits(680));
+        MinimumSize = new Size(LogicalToDeviceUnits(760), LogicalToDeviceUnits(520));
+        _sidebar.Width = LogicalToDeviceUnits(190);
+        _content.Padding = new Padding(LogicalToDeviceUnits(28), LogicalToDeviceUnits(22), LogicalToDeviceUnits(16), 0);
         StartPosition = FormStartPosition.CenterParent;
         ShowInTaskbar = false;
         MinimizeBox = false;
@@ -462,7 +477,7 @@ internal sealed class SettingsForm : Form
         foreach (var code in picked.Where(c => regions.All(r => !string.Equals(r.Code, c, StringComparison.OrdinalIgnoreCase))))
             regions.Add(new Aws.RegionInfo(code.ToLowerInvariant(), "Other", code.ToLowerInvariant()));
 
-        const int boxWidth = ContentWidth / 2 - 6;
+        int boxWidth = ContentWidth / 2 - 6;
         _regionPanel.SuspendLayout();
         foreach (var group in regions.GroupBy(r => r.Group))
         {
@@ -671,7 +686,7 @@ internal sealed class SettingsForm : Form
     { Text = "Open new terminals docked", AutoSize = true, Margin = new Padding(0, 12, 0, 2) };
     private readonly TextBox _txtSshKey = new() { Width = 380 };
     private readonly ThemedCheckBox _chkRestoreTabs = new()
-    { Text = "Restore my tabs when Switchboard starts", AutoSize = true, Margin = new Padding(0, 12, 0, 2) };
+    { Text = "Restore my tabs when Switchboard starts", AutoSize = true, Margin = new Padding(0, 8, 0, 2) };
     private readonly ThemedCheckBox _chkRestoreOutput = new()
     { Text = "Also restore terminal output (kept on this PC until Switchboard next closes)", AutoSize = true, Margin = new Padding(20, 4, 0, 2) };
 
@@ -713,16 +728,6 @@ internal sealed class SettingsForm : Form
 
         _chkDockNew.Checked = _settings.DockNewTerminals;
         _chkDockNew.CheckedChanged += (_, _) => { _settings.DockNewTerminals = _chkDockNew.Checked; _settings.Save(); };
-        _chkRestoreTabs.Checked = _settings.RestoreTabs;
-        _chkRestoreOutput.Checked = _settings.RestoreScrollback;
-        _chkRestoreOutput.Enabled = _settings.RestoreTabs;
-        _chkRestoreTabs.CheckedChanged += (_, _) =>
-        {
-            _settings.RestoreTabs = _chkRestoreTabs.Checked;
-            _chkRestoreOutput.Enabled = _chkRestoreTabs.Checked;
-            _settings.Save();
-        };
-        _chkRestoreOutput.CheckedChanged += (_, _) => { _settings.RestoreScrollback = _chkRestoreOutput.Checked; _settings.Save(); };
 
         string ssh = Tools.Ssh;
         page.Controls.AddRange(new Control[]
@@ -737,14 +742,9 @@ internal sealed class SettingsForm : Form
             FieldLabel("Default shell (Ctrl+T)"),
             _cboShell,
             _chkDockNew,
-            _chkRestoreTabs,
-            _chkRestoreOutput,
-            Muted("Remote Desktop and SSH tabs reconnect (up to five at start-up; any more wait for a click), shells and " +
-                  "Claude tabs reopen, and AWS tabs follow once you're signed in. Passwords typed for Connect as aren't kept. " +
-                  "Terminal output, when kept, shows dimmed above a fresh shell; what was running can't come back."),
             Muted("New shells and SSH sessions open in the docked panel under the tabs instead of in a tab of their own. " +
                   "Move back to a tab still works on any of them."),
-            Muted("Terminal font and text size are under Appearance."),
+            Muted("Terminal font and text size, and restoring tabs at start-up, are under Appearance."),
 
             Heading("SSH"),
             Muted("Linux servers open in an SSH terminal tab. AWS servers are reached through the same Session Manager " +
@@ -911,6 +911,18 @@ internal sealed class SettingsForm : Form
             _appearanceChanged();
         };
 
+        // tabs at start-up (they lived on Terminal & SSH before 3.24.0; the settings are the same)
+        _chkRestoreTabs.Checked = _settings.RestoreTabs;
+        _chkRestoreOutput.Checked = _settings.RestoreScrollback;
+        _chkRestoreOutput.Enabled = _settings.RestoreTabs;
+        _chkRestoreTabs.CheckedChanged += (_, _) =>
+        {
+            _settings.RestoreTabs = _chkRestoreTabs.Checked;
+            _chkRestoreOutput.Enabled = _chkRestoreTabs.Checked;
+            _settings.Save();
+        };
+        _chkRestoreOutput.CheckedChanged += (_, _) => { _settings.RestoreScrollback = _chkRestoreOutput.Checked; _settings.Save(); };
+
         page.Controls.AddRange(new Control[]
         {
             Title("Appearance"),
@@ -940,6 +952,14 @@ internal sealed class SettingsForm : Form
                 v => { _settings.CloseToTray = v; _settings.CloseChoiceMade = true; }),   // chosen here: the close button doesn't ask
             Muted("Switchboard keeps running in the tray: sessions, tunnels and sign-in renewal carry on. Click its tray icon " +
                   "to open it again; Exit (in the tray icon's menu or the File menu) closes it."),
+
+            Heading("Tabs at start-up"),
+            _chkRestoreTabs,
+            _chkRestoreOutput,
+            Muted("Remote Desktop and SSH tabs reconnect (up to five at start-up; any more wait for a click), shells and " +
+                  "Claude tabs reopen, and AWS tabs follow once you're signed in. Popped-out windows come back where they " +
+                  "were and reconnect straight away. Passwords typed for Connect as aren't kept. Terminal output, when " +
+                  "kept, shows dimmed above a fresh shell; what was running can't come back."),
 
             Heading("Terminal colours"),
             Muted("The colour scheme for SSH and shell tabs: background, text, and the 16 colours every console " +

@@ -619,6 +619,11 @@ internal static class Icons
     public const string HideDown = "\uE70D"; // chevron down
     public const string ShowUp = "\uE70E";   // chevron up
     public const string CloseX = "\uE711";   // ×
+    public const string FullScreen = "\uE740";      // four corners out
+    public const string ExitFullScreen = "\uE73F";  // four corners in (back to a window)
+    public const string Pin = "\uE718";      // pushpin (keep on top)
+    public const string Unpin = "\uE77A";    // crossed pushpin
+    public const string Keyboard = "\uE765"; // keyboard (Ctrl+Alt+Del)
 
     /// <summary>A glyph drawn into a transparent square bitmap, for ToolStrip items that show an icon and text.</summary>
     public static Bitmap Render(string glyph, Color color, int px)
@@ -879,6 +884,40 @@ internal sealed class ThemedTabControl : TabControl
 
     private int BadgeWidth(string badge) =>
         TextRenderer.MeasureText(badge, BadgeFont, Size.Empty, TextFormatFlags.NoPadding).Width + Px(10);
+
+    /// <summary>
+    /// A badge pill (AWS / RDP / SSH / VNC) in its fixed colours, softened when not selected. Shared by the tab strips and
+    /// the popped-out window's toolbar, so the two look the same.
+    /// </summary>
+    public static void DrawBadge(Graphics g, string badge, Font font, Rectangle pill, bool selected, Palette p)
+    {
+        // fixed colours: AWS in AWS's orange, RDP in indigo (#5B5EC5), SSH in magenta (#944792), VNC in teal
+        var (fill, fore) = badge switch
+        {
+            "AWS" => (Color.FromArgb(0xFF, 0x99, 0x00), Color.FromArgb(0x23, 0x2F, 0x3E)),
+            "RDP" => (Color.FromArgb(0x5B, 0x5E, 0xC5), Color.White),
+            "SSH" => (Color.FromArgb(0x94, 0x47, 0x92), Color.White),
+            "VNC" => (Color.FromArgb(0x14, 0xB8, 0xA6), Color.FromArgb(0x10, 0x2A, 0x27)),
+            _ => (p.Accent, p.AccentText),
+        };
+        if (!selected) { fill = Blend(fill, p.Back, 0.35); fore = Blend(fore, fill, 0.15); }
+        var oldMode = g.SmoothingMode;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using (var path = new System.Drawing.Drawing2D.GraphicsPath())
+        using (var brush = new SolidBrush(fill))
+        {
+            int d = 8;   // corner diameter
+            path.AddArc(pill.Left, pill.Top, d, d, 180, 90);
+            path.AddArc(pill.Right - d, pill.Top, d, d, 270, 90);
+            path.AddArc(pill.Right - d, pill.Bottom - d, d, d, 0, 90);
+            path.AddArc(pill.Left, pill.Bottom - d, d, d, 90, 90);
+            path.CloseFigure();
+            g.FillPath(brush, path);
+        }
+        g.SmoothingMode = oldMode;
+        TextRenderer.DrawText(g, badge, font, pill, fore,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+    }
 
     /// <summary>Spaces in front of a tab's text that leave room for its badge, measured in this strip's font.</summary>
     public string BadgeRoom(string badge)
@@ -1375,32 +1414,7 @@ internal sealed class ThemedTabControl : TabControl
                 string badge = tag[BadgeTagPrefix.Length..];
                 int w = BadgeWidth(badge);
                 var pill = new Rectangle(textRect.Left, textRect.Top + (textRect.Height - BadgeHeight) / 2 + 1, w, BadgeHeight);
-                // fixed colours: AWS in AWS's orange, RDP in indigo (#5B5EC5), SSH in magenta (#944792), VNC in teal
-                var (fill, fore) = badge switch
-                {
-                    "AWS" => (Color.FromArgb(0xFF, 0x99, 0x00), Color.FromArgb(0x23, 0x2F, 0x3E)),
-                    "RDP" => (Color.FromArgb(0x5B, 0x5E, 0xC5), Color.White),
-                    "SSH" => (Color.FromArgb(0x94, 0x47, 0x92), Color.White),
-                    "VNC" => (Color.FromArgb(0x14, 0xB8, 0xA6), Color.FromArgb(0x10, 0x2A, 0x27)),
-                    _ => (p.Accent, p.AccentText),
-                };
-                if (!sel) { fill = Blend(fill, p.Back, 0.35); fore = Blend(fore, fill, 0.15); }
-                var oldMode = g.SmoothingMode;
-                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                using (var path = new System.Drawing.Drawing2D.GraphicsPath())
-                using (var brush = new SolidBrush(fill))
-                {
-                    int d = 8;   // corner diameter
-                    path.AddArc(pill.Left, pill.Top, d, d, 180, 90);
-                    path.AddArc(pill.Right - d, pill.Top, d, d, 270, 90);
-                    path.AddArc(pill.Right - d, pill.Bottom - d, d, d, 0, 90);
-                    path.AddArc(pill.Left, pill.Bottom - d, d, d, 90, 90);
-                    path.CloseFigure();
-                    g.FillPath(brush, path);
-                }
-                g.SmoothingMode = oldMode;
-                TextRenderer.DrawText(g, badge, BadgeFont, pill, fore,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+                DrawBadge(g, badge, BadgeFont, pill, sel, p);
                 text = text.TrimStart();
                 textRect = new Rectangle(textRect.Left + w + BadgeGap, textRect.Top, Math.Max(0, textRect.Width - w - BadgeGap), textRect.Height);
             }

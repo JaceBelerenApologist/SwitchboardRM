@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace SwitchboardRM;
 
-/// <summary>One tab to reopen next time (Settings > Terminal & SSH > Restore my tabs).</summary>
+/// <summary>One tab to reopen next time (Settings > Appearance > Tabs at start-up).</summary>
 internal sealed class TabState
 {
     public string Kind { get; set; } = "";        // "shell", "claude-web", "rdp", "ssh", "vnc"
@@ -13,6 +13,11 @@ internal sealed class TabState
     public string Name { get; set; } = "";        // for placeholders and messages
     public string AsUser { get; set; }            // Connect as (the password is never kept)
     public bool Docked { get; set; }
+    public bool PoppedOut { get; set; }           // in a window of its own (Docked: where it goes back to)
+    public int[] WindowBounds { get; set; }       // popped out: x, y, width, height when not maximized
+    public bool WindowMaximized { get; set; }
+    public bool WindowFullScreen { get; set; }
+    public bool WindowOnTop { get; set; }
     public string ScrollbackFile { get; set; } = "";   // file name in the scrollback folder, if output was kept
     public bool IsRemote => Kind is "rdp" or "ssh" or "vnc";
     public bool IsAws => IsRemote && SavedId.Length == 0;

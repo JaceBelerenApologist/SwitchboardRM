@@ -17,8 +17,15 @@ account numbers, hostnames or certificate details.
   through **Session Manager tunnels**: Remote Desktop (embedded MsRdpClient ActiveX) or SSH (embedded terminal). No
   open inbound ports needed. Start, stop and reboot instances.
 - **Saved connections** (direct RDP / SSH, not AWS), importable from RDCMan, mRemoteNG, `.rdp` files and PuTTY.
+- **VNC** in tabs (noVNC, built in): saved VNC connections, and AWS servers through a tunnel to port 5900.
+- **Managing AWS servers** without the console: the Server window (details, screen and log, tags, protection,
+  instance type, disks, network, images and snapshots, Run command, patches, terminate), the New server wizard,
+  port forwarding, bulk start/stop/reboot, and **Volumes and snapshots** (every EBS volume and snapshot, Add disks,
+  cleanup).
 - **Local shells** in tabs (Command Prompt, PowerShell 5.1/7, Git Bash, WSL distributions), **Claude Code** in a
   terminal tab, and **claude.ai** in a web tab.
+- **Comfort:** tabs and layout restored at start-up (remote tabs reconnect by themselves), automatic reconnect after a
+  lost connection, Connect as, tab and server tooltips, themes/fonts, system tray, one copy at a time, self-updating.
 - **Sign-in to AWS:** built-in Microsoft Entra ID (SAML) sign-in, or AWS IAM Identity Center (SSO) via the AWS CLI.
   Status countdown, background renewal, sign-out on close.
 
@@ -41,7 +48,24 @@ Primary user: the maintainer, an experienced IT administrator who signs in to AW
   gets real tests; Windows-only UI behaviour gets a clear "check this on Windows" note. Never claim untested things work.
 - **Every app change gets a version bump and a CHANGELOG entry** (section 5). Repo-only changes (workflow, scripts,
   README) don't bump the app version unless they change what a release contains and the maintainer wants it out.
-- **Never run `git-release.ps1`, push, tag, publish a release, or touch GitHub settings unless asked.**
+- **Versions and pushing:** the maintainer pushes releases and says when a version has gone out. Until then, fold
+  further fixes into the unreleased version; once it's pushed, the next change starts a new one (PATCH for fixes,
+  MINOR for features). Unsure? Ask. A big feature is **one version**, not a string of revisions: settle its whole scope
+  first (discuss, mock up), then build it in one go when told ("do it as a one-shot").
+- **Design before code for anything visual:** offer options, mock-ups or previews (an image is fine), and let the
+  maintainer choose. "Treat every detail as deliberate" applies to their choices too (exact colours, naming
+  conventions, defaults).
+- **Be economical with usage:** keep each session to one task; don't re-read huge files (`MainForm.cs` is ~4,400
+  lines): `grep` for the method, then read just that range. Build (`dotnet build`) to find compile errors yourself
+  rather than handing them back.
+- **Pushing is the maintainer's decision, every time. Permanent rule.** Claude doesn't push on its own initiative;
+  nothing carries the decision over from an earlier push or session. When a change is ready, say so and wait.
+  **Only when the maintainer explicitly says to push** (that time), run `git-release.ps1`
+  (`powershell -ExecutionPolicy Bypass -File .\git-release.ps1`): never a plain `git push`. Never tag, publish a
+  release by other means, or touch GitHub settings.
+- **Building is fine, any time it helps:** `dotnet build` to check compiling, and `.\publish.cmd` when a binary is
+  needed. `publish.cmd` always exists and must always end with a working `output\SwitchboardRM.exe`; after running it,
+  check the exe is there (and fix the cause if it isn't).
 - **Don't install or remove software on the maintainer's PC unless asked.**
 - Answers: direct, structured, no filler. Explain the "why" briefly; give exact commands/paths when action is needed.
   Wording in the app's UI: plain English, specific, honest about limits (see section 8).
@@ -54,13 +78,13 @@ All from the project folder, on Windows, with the **.NET 10 SDK**.
 
 | Task | Command |
 |---|---|
-| Build | `dotnet build` |
+| Build (catches compile errors: run it before saying a change is done) | `dotnet build` |
 | Run (development) | `dotnet run` (uses the project's own `tools\` folder in place) |
 | Publish (self-contained single file) | `.\publish.cmd` → `output\SwitchboardRM.exe` + `output\tools\` + `output\fonts\` |
 | Collect bundled tools into `tools\` | `powershell -ExecutionPolicy Bypass -File .\collect-tools.ps1` |
 | Update installed tools, then collect | `powershell -ExecutionPolicy Bypass -File .\update-tools.ps1` (`-CheckOnly`, `-NoCollect`) |
 | Build an unsigned test installer | `.\publish.cmd`, then `powershell -ExecutionPolicy Bypass -File .\build-installer.ps1` (needs Inno Setup 6) |
-| Release | bump `<Version>` + CHANGELOG, then `powershell -ExecutionPolicy Bypass -File .\git-release.ps1` (**only when asked**) |
+| Release | bump `<Version>` + CHANGELOG, then `powershell -ExecutionPolicy Bypass -File .\git-release.ps1` (it pushes: **only when the maintainer explicitly says to push, that time**) |
 
 `git-release.ps1`: reads the version from the `.csproj`, refuses a version already released (tag exists here or on
 GitHub), checks the CHANGELOG has a section for it, refuses files over 50 MB, commits everything (`Release X.Y.Z` +
@@ -102,6 +126,8 @@ Runs on `windows-latest`.
   changes; **MAJOR** = removing something or breaking existing setups (3.0.0 removed aws-azure-login).
 - Every version has a `## X.Y.Z (YYYY-MM-DD)` section at the top of `CHANGELOG.md` (newest first). Bullets in plain
   English, user-facing, explaining what changed and why it matters; fixes start with **"Fixed:"** and state the cause.
+- **The date is today's real date** (the day the version is written/released), never the previous entry's date plus
+  one. Several versions on the same day share a date. Check the actual date before writing the heading.
 - `CHANGELOG.md` is embedded in the exe and shown in-app (Settings > About > *What's new in this version*; Help > About opens that page). The workflow publishes the matching
   section as release notes, so it must exist before releasing.
 - If several changes accumulate before a release, they share one version; if a version was already released,
@@ -114,7 +140,7 @@ Runs on `windows-latest`.
 | File | Responsibility |
 |---|---|
 | `Program.cs` | Entry: `Migration.Run()`, `FontLoader.LoadAll()`, `TERM=xterm-256color`, crash marker (`RunMarker`), `StartupContext` (splash → `MainForm.PrepareAsync`), crash clean-up (signs out leftover keys if the last run didn't exit cleanly) |
-| `MainForm.cs` (~3,300 lines) | Main window: toolbar, menus, server list, tabs, docked terminal panel, connect flow, sign-in/renewal heartbeat, shells, Claude tabs, tab keys, wake/unlock handling, update notice, New server entry points, system tray |
+| `MainForm.cs` (~4,400 lines) | Main window: toolbar, menus, server list, tabs, docked terminal panel, connect flow, sign-in/renewal heartbeat, shells, Claude tabs, tab keys, wake/unlock handling, update notice, New server entry points, system tray |
 | `AwsServices.cs` | `Aws` (config/credentials paths, `ConfigValue`, `SetConfigValues`, `SetCredentials`, `SignOutAsync`, profiles list/remove, identity), inventory (SSM + EC2 per region), Session Manager tunnel (SDK `StartSession` + `session-manager-plugin.exe`), instance actions |
 | `EntraSignIn.cs` | Built-in Microsoft sign-in: SAML request, WebView2 sign-in window, hand-off capture, roles, STS `AssumeRoleWithSAML`, writes keys |
 | `ProfileSetup.cs`, `ProfileForms.cs` | Add / Edit / Remove profiles in-app: Microsoft (Entra) form with *Check sign-in* (lists roles), SSO form |
@@ -133,12 +159,15 @@ Runs on `windows-latest`.
 | `ServerAdmin.cs`, `ServerForm.cs` | The Server window (Manage server, EC2 only): pages on the left, each built on first view and themed as shown. 3.7.0: Overview (details, disks, status checks, scheduled events), Screen and log (`GetConsoleScreenshot` with WakeUp, `GetConsoleOutput` Latest with fallback), Name and tags (`CreateTags`/`DeleteTags` diff, aws: tags untouched), Protection (`ModifyInstanceAttribute` one attribute per call, `Monitor`/`UnmonitorInstances`). 3.8.0: Instance type (stop → wait → `ModifyInstanceAttribute` InstanceType → start if it was running; stop protection respected) and Disks (`ModifyVolume` + wait for optimizing/completed, then `ServerAdmin.ExtendScript` through Run Command; `CreateVolume` + `AttachVolume` at the next free xvdf…/sdf… + `FormatNewDiskScript` on Windows; `DetachVolume` keeps the disk). In-OS scripts find the disk by its NVMe serial (volume ID without the dash); a partition without a letter reports `[char]0`, so letter checks use `-notmatch '^[A-Za-z]$'`. `ServerAdmin.RunScriptAsync` (AWS-RunPowerShellScript / AWS-RunShellScript, polls `GetCommandInvocation`) is the building block for the Run Command page. 3.9.0: Network (per interface: `ModifyNetworkInterfaceAttribute` Groups / SourceDestCheck, `Assign`/`UnassignPrivateIpAddresses` with the wizard's address check; instance profile via `DescribeIamInstanceProfileAssociations` then Associate / Replace / Disassociate) and Images and snapshots (`CreateImage` NoReboot = !reboot, tagged SourceInstance; `CreateSnapshots` for all disks at once; restore = `CreateVolume` from the snapshot + attach + `BringOnlineScript` on Windows, never touching the original disks). Pages load their lists on first view (`ShowPage` → Load…Async by page index). 3.10.0: Run command (one `SendCommand` to this server plus ticked peers of the same platform — online, same region, passed in by MainForm as `CommandTarget`s — then `GetCommandInvocation` per server; recent commands in `AppSettings.RecentCommands`) and Patches and agent (`DescribeInstanceInformation`, `DescribeInstancePatchStates`, `DescribeInstancePatches` State=Missing/Failed, `AWS-RunPatchBaseline` Scan/Install with RebootOption NoReboot by default, `ListInventoryEntries` AWS:Application). 3.11.0: Terminate button (Protection page, `TerminateForm`) |
 | `VncHost.cs`, `Assets\vnc\` | VNC tabs (3.20.0): noVNC 1.5.0 (MPL 2.0) + Switchboard's `vnc.html`, embedded (`SwitchboardRM.vnc\<path>`) and served to WebView2 from the .exe at `http://switchboard.vnc/` via `WebResourceRequested`. `VncRelay` = loopback WebSocket server (random token in the path, `WebSocket.CreateFromStream` after a hand-made 101) relaying to the VNC server or the Session Manager tunnel (port 5900). Passwords: Credential Manager key `vnc:<host:port or instance id>`, value `user\u0001password`, tried once before asking. Page <-> host by web messages (credentials, connected, disconnected, securityfailure, clipboard, reconnect / cad, paste, focus, close) |
 | `VolumeAdmin.cs` | EBS across the scanned regions (3.23.0): `VolumesAsync` / `SnapshotsAsync` (with AMIs needing each snapshot, and whether its source volume exists), `KeysAsync` (customer-managed KMS keys usable for EBS + AWS managed, account EBS default marked; AWSSDK.KeyManagementService), create (waits for available), attach, detach, modify, delete, snapshot, copy, tags; `MonthlyCost` estimates (Pricing API storage + gp3/io extras scaled by the region's gp3 price); `VolumeRules.Check` = EBS limits per type (gp3 baseline 3,000 IOPS at any size; 500 IOPS/GiB above it; throughput <= IOPS/4); `NextDevice` |
-| `AddDisksForm.cs` | Several disks at once: rows (drive/name, size, type, IOPS, MB/s, cost, status), encryption key (last used per region in `AppSettings.LastKmsKeys`, else account default), tags (server's offered), attach. `ForServer` (Server window Disks page; names "Server - Drive") / `Standalone` (Volumes window; zone + optional server; or from a snapshot). Callers read `Created`, not DialogResult |
+| `AddDisksForm.cs` | Several disks at once: rows (drive/name, size, type, IOPS, MB/s, cost, status), encryption key (last used per region in `AppSettings.LastKmsKeys`, else account default), tags (server's offered), attach. `ForServer` (Server window Disks page; names "Server - Drive") / `Standalone` (Volumes window; zone + optional server; or from a snapshot). Callers read `CreatedVolumes` (not `Created`: that's a built-in Control member), not DialogResult |
 | `VolumesForm.cs`, `VolumeDialogs.cs` | AWS > Volumes and snapshots: pages Volumes / Snapshots / Cleanup like the Server window; small dialogs: `TagsForm`, `TypedConfirmForm`, `ModifyVolumeForm`, `ChoiceForm` |
 | `NotesForm.cs` | Release notes viewer (update notice's What's new, Settings > About > What's new): `NotesView` parses the CHANGELOG's markdown (## version (date), - bullets with indented continuation lines and sub-points, 1. steps, **bold**, `code`, "Fixed:" shown as a FIXED tag) and lays it out and draws it itself, in the app font (an embedded browser couldn't use fonts-folder fonts) |
-| `SessionRestore.cs` | Restoring tabs: `tabs.json` (settings folder) holds `TabState`s in tab order (main, then docked) plus the selected index; terminal output (option, off by default) in `%LOCALAPPDATA%\SwitchboardRM\scrollback\tabN.txt`, read on close through `window.sbScrollback()` in terminal.html (last 5,000 lines, wrapped lines joined; ~3 s overall limit) and replayed dimmed by `TerminalHost.Replay`. Captured in `OnFormClosing` after the sessions question (`_closeConfirmed` / `_tabsSaved` stop it asking or saving twice when the close restarts after reading output). `RestoreTabsAsync` runs at the end of start-up: local tabs at once, the first 5 remote tabs reconnect, the rest become `_placeholders` (Reconnect opens a new tab at the end: RDP pages aren't moved between positions, which risks the ActiveX control), AWS tabs wait in `_pendingRestore` until `_aws` loads. Claude Code reopens with `--continue`; Connect as keeps the user, never the password |
+| `HoverTip.cs` | The tooltip card (server list and both tab strips): a click-through, never-activated window (`ShowWindow` SW_SHOWNOACTIVATE + `SetWindowPos` HWND_TOPMOST; not `TopMost = true`, which activated it) drawing a `TipContent` (title, subtitle, label/value rows with colour, tags, note). Any control: a hit-test (`Func<Point, object>`) and a card builder; it hides when the cursor isn't over the *same* item (`StillOverHovered`), when the main window isn't in front, and ignores mouse-moves without movement |
+| `ShellIcons.cs` | Each shell's own program icon (cmd, powershell, pwsh, Git Bash's git-bash.exe, wsl, claude.exe), read at run time and cached; never bundled (other companies' artwork) |
+| `SessionRestore.cs` | Restoring tabs: `tabs.json` (settings folder) holds `TabState`s in tab order (main, then docked) plus the selected index; terminal output (option, off by default) in `%LOCALAPPDATA%\SwitchboardRM\scrollback\tabN.txt`, read on close through `window.sbScrollback()` in terminal.html (last 5,000 lines, wrapped lines joined; ~3 s overall limit) and replayed dimmed by `TerminalHost.Replay`. Captured in `OnFormClosing` after the sessions question (`_closeConfirmed` / `_tabsSaved` stop it asking or saving twice when the close restarts after reading output). `RestoreTabsAsync` runs at the end of start-up: local tabs at once, the first 5 remote tabs reconnect, the rest become `_placeholders` that `ReconnectPlaceholdersAsync` reconnects in batches (see lesson 25h): each connects **inside its placeholder's own TabPage** (`ShowSessionTab`), created hidden and brought up on first view (`ReviveHiddenTab`). AWS tabs wait in `_pendingRestore` until `_aws` loads. Claude Code reopens with `--continue`; Connect as keeps the user, never the password |
 | `PortForwarding.cs`, `TerminateForm.cs` | Port forwarding: `Tunnel.StartAsync(inst, profile, remotePort, remoteHost, localPort)` uses `AWS-StartPortForwardingSessionToRemoteHost` when a host is given (else `AWS-StartPortForwardingSession`); a fixed local port is checked free first. `MainForm._forwards` (`PortForward`) is shown in the non-modal `ForwardsForm` (Server > Port forwards) and disposed on exit. Terminate: `ServerAdmin.TerminationInfoAsync` lists disks deleted/kept (DeleteOnTermination) and protection; Terminate is enabled only when the typed name matches; afterwards MainForm closes the server's tabs and forwards. Bulk: the server list is multi-select; `RunActionAsync` runs Start/Stop/Reboot on every selected EC2 server after one confirmation (other commands use the first selected) |
 | `SingleInstance.cs` | One copy per Windows session (setting `SingleInstance`, default on): named mutex `Local\SwitchboardRM.Running` claimed in `Program.Main`; a second start signals `Local\SwitchboardRM.Activate` (after `AllowSetForegroundWindow`) and exits; MainForm brings itself forward (from the tray too). `--updated` (installer relaunch after an update) waits up to 20 s for the old copy to exit. The crash marker is unaffected: `RunMarker` already ignores a marker whose process is still a running Switchboard |
+| `PopoutForm.cs` | Pop out to own window (3.24.0): any session (main or docked tab) in a window of its own. `MainForm.PopOut` moves the session's **controls** into `PopoutForm.Body` (window shown and handles created first, then the controls, then the empty page leaves its strip; never the page itself, lesson 26a); `ReturnFromPopout` reverses it into the strip it came from (`Session.Docked` = home). `Session.Popout` set while out; the page stays alive, keeps the title (the window follows `Page.TextChanged`) and its Tag gives the badge (`ThemedTabControl.DrawBadge`, shared with the strips). `ContentHost(s)` = where the controls are (the reconnect overlay goes there); `ShowSession(s)` brings a session forward either way. Bar: Return, Full screen (RDP/VNC; borderless over the screen, bar kept: Esc belongs to the session), Keep on top, Ctrl+Alt+Del, Reconnect. × closes the session (`CloseRequested`, ask = false), Ctrl+Shift+W asks; MainForm closes the window itself with `ClosingQuietly`. Saved in `tabs.json` after the tabs (`TabState.PoppedOut`, `WindowBounds`, `WindowMaximized`, `WindowFullScreen`, `WindowOnTop`); restored ones always reconnect at once (no placeholder) and go back out via `PopOutRestored`. Independent windows (no owner): they don't follow the main window to the tray |
 | `ConnectAsForm.cs` | Connect as dialog; the session carries `AsUser` / `AsPassword` (memory only), used by `StartRdpAsync` and `SshCommand`, kept on reconnect; Connect as always opens its own tab |
 | `Connections.cs`, `ConnectionImport.cs` | Saved connections (connections.json), connection dialog (also "connect now"), importers |
 | `CredentialStore.cs` | Windows Credential Manager (`SwitchboardRM:<user>`) |
@@ -192,7 +221,9 @@ renewal); sign-out on close removes only temporary keys (never the `[profile]` h
 ### 7.4 Tunnels, RDP, SSH
 SDK `StartSession` (port forwarding) → `session-manager-plugin.exe` carries the data channel to a local port →
 RDP ActiveX connects to `localhost:<port>` (dynamic resolution via `UpdateSessionDisplaySettings`), or `ssh.exe`
-runs in a terminal against it with `HostKeyAlias=<instance-id>`. Linux defaults to SSH, Windows to RDP.
+runs in a terminal against it with `HostKeyAlias=<instance-id>`. Linux defaults to SSH, Windows to RDP. Through a
+tunnel, Remote Desktop's own reconnect (`EnableAutoReconnect`) is **off**: it retries the dead tunnel's local port for
+minutes; Switchboard's reconnect (fresh tunnel) takes over at once (lesson 25d). Direct connections keep it on.
 
 ### 7.5 Terminals and shells
 `TerminalHost` = WebView2 (`%LOCALAPPDATA%\SwitchboardRM\WebView2`) + xterm.js; `PseudoConsole` runs the program.
@@ -358,7 +389,9 @@ commands by `$LASTEXITCODE`, never by stderr (9.1). Parse-check with
     DISPID 4, plus `ExtendedDisconnectReason`) is recorded on the session; `MainForm.IsDeliberateEnd` closes the tab
     only for reason 1 (this side) or 2 (remote user), or extended 1, 2, 5, 11, 12 (admin disconnect/logoff, replaced,
     user disconnect/logoff). Everything else goes to `AutoReconnectAsync`: same tab, `Session.Overlay`, new tunnel,
-    `StartRdpAsync` on the same control; retries 5 s then 15 s up to 10 min, at once on `NetworkAvailabilityChanged`.
+    `StartRdpAsync` on the same control; retries 5 s then 15 s up to 10 min, at once on `NetworkAvailabilityChanged`. While
+    Windows is locked or asleep (`Away`: `_locked` / `_asleep`, from SessionSwitch / PowerModeChanged) the loop waits
+    without counting; `ResumeReconnects` on unlock/wake resets `ReconnectAttempt` / `ReconnectUntil` and retries at once.
 25e. **Don't use ListView's own item tooltips (`ShowItemToolTips`) for the server list:** the native tip appears under
     the cursor and captures the mouse when moving down, so hover tracking stops. `HoverTip` is a click-through layered
     window (`WS_EX_TRANSPARENT` + `HTTRANSPARENT`) driven by the list's MouseMove. It draws a `TipContent` card
@@ -396,6 +429,8 @@ commands by `$LASTEXITCODE`, never by stderr (9.1). Parse-check with
     briefly) drops the connection. `ThemedTabControl.MoveTab` reorders by assigning positions
     (`TabPages[i] = page`, which only relabels the native tab items) in neighbour swaps, then sets `SelectedIndex`.
     Dragging a tab (left button, past `SystemInformation.DragSize`) and the tab menu's Move left/right use it.
+    **Moving the session's controls (not the page) to another parent, even another window, keeps the connection**:
+    confirmed on Windows with a live RDP session (3.24.0 pop-out). Give the new parent its handle before moving them in.
 26b. **Anything saved only in `OnFormClosing` is lost on a Windows shutdown or restart** if the close stops to ask a
     question: Windows ends the app first. Layout is saved shortly after each change (`LayoutChanged` → `SaveLayoutNow`,
     1 s timer), and `CloseReason.WindowsShutDown` / `TaskManagerClosing` skip the questions (and terminal output) and
@@ -461,24 +496,30 @@ Endpoint *certificate allow indicator* would use the public `.cer` (extractable 
 
 ## 14. Open items / roadmap (discussed, not built unless noted)
 
-- **Built:** the auto-updater (3.2.0), the New server wizard with prices, data disks and full network control (3.3.0),
-  system tray options (3.4.0). See 7.7 and 7.8.
-- **Updater vs. private repository (open decision):** the repository is currently **private**, so the updater's
-  anonymous GitHub check gets 404 and can't work. Options discussed: make the repo public (works as built); keep code
-  private and publish releases to a separate public repo (workflow pushes with a token secret; `AppInfo.Repo` points
-  there); an internal update location (S3 / web server / share, URL set by setting or policy); or disable the updater by
-  policy (`DisableUpdateCheck = 1`) and deploy updates with Intune (Win32 app with supersedence). Never embed a GitHub
-  token in the app.
-- **New server, later:** launching several identical servers at once (a count, with numbered names) was discussed and
-  deferred.
-- **SSO sign-in via the AWS SDK** (removes the bundled AWS CLI): deferred until someone with SSO can test it.
-  Option meanwhile: stop bundling the CLI and use an installed one (declined for now: keep bundling).
+Current version: see `<Version>` in the `.csproj` (3.23.1 when this was written; the maintainer says when it's pushed).
+
+**Resolved:** the updater vs. the private repository: the repository is **public** now and the updater works as
+built (`DisableUpdateCheck` policy still available for Intune-managed installs).
+
+**Open, in rough priority order:**
+- **Exit hang after "close them and exit?"** (seen from the tray, after the question is answered): the clean-up after
+  the answer stalls. Suspect: `ClosePseudoConsole` on the UI thread (it can block while a console program won't
+  finish). Plan: close pseudo-consoles off the UI thread with a time limit (then kill the process), and log each exit
+  step so a stall shows where. Not started.
+- **Background-reconnected tabs' display:** tabs reconnected while hidden are created hidden and brought up on first
+  view (`ReviveHiddenTab`). If a tab still shows nothing when selected, fall back to connecting while briefly shown
+  with drawing paused, then restore the tab and redraw only the strip (not the visible page).
+- **Per-server SSH keys for AWS servers:** `~/.ssh/config` `Host` entries can't match AWS servers today (ssh is pointed
+  at 127.0.0.1). Fix: `ssh <instance-id> -o HostName=127.0.0.1 -p <port>` so `Host i-...` entries apply. Maintainer
+  prefers the standard ssh config over a per-connection key setting.
+- **Pin the AWS SDK versions** (`4.*` floats: each build takes the newest 4.x) to the versions of the last good build.
+- **AWS badge showing the protocol,** so AWS tabs can drop their `· SSH` / `· VNC` suffix (saved connections already
+  don't need it).
+- **New server, later:** several identical servers at once (count + numbered names). Deferred.
+- **SSO sign-in via the AWS SDK** (would drop the bundled AWS CLI): deferred until someone with SSO can test it.
 - **Smaller bundle:** single-file compression (`EnableCompressionInSingleFile`, ~80–100 MB off, slower first start).
-- **MCP server** idea: expose Switchboard (list instances, start/stop, run SSM commands) to Claude Code / Claude
-  desktop as tools. Idea only.
-- **Native Claude panel on the Claude API** (separate billing, data-policy check): idea only.
-- **Linux/macOS port:** would need Avalonia (not Mono), FreeRDP or external RDP clients, Unix PTYs, Keychain/libsecret.
-  Shared core library first. Not planned.
+- Ideas only: an **MCP server** exposing Switchboard to Claude (list, start/stop, run commands); a native Claude panel
+  on the API; a Linux/macOS port (Avalonia, FreeRDP, Unix PTYs).
 
 ---
 

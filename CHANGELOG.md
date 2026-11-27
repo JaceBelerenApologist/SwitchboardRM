@@ -3,10 +3,30 @@
 All notable changes to Switchboard Remote Manager (called AWS RDP Launcher before 2.0). Versions follow MAJOR.MINOR.PATCH:
 PATCH for fixes, MINOR for new features, MAJOR for changes that break existing setups.
 
-## 3.23.0 (2026-12-13)
+## 3.24.0 (2026-11-27)
+
+- Pop out to own window: right-click any tab (Remote Desktop, SSH, VNC, a local shell, Claude Code, claude.ai, docked
+  terminals too) and choose Pop out to own window. The session moves into a window of its own without disconnecting,
+  with its own taskbar button, so it can sit on another screen. A thin bar at the top shows its badge and name, with
+  Return to main window (back to its tab, or to the docked panel if it came from there), Full screen (Remote Desktop
+  and VNC: covers the screen it's on, the bar stays so there's always a way back), Keep on top, Ctrl+Alt+Del and
+  Reconnect, where they apply. The window's × closes the session, as a tab's × does; Ctrl+Shift+W asks first.
+- Popped-out windows come back next time with your tabs: in the same place and size, on the same screen if it's
+  still connected, maximized, full screen or on top as they were. They reconnect straight away rather than waiting
+  their turn.
+- Settings: Restore my tabs (and Also restore terminal output) moved from Terminal & SSH to Appearance, under Tabs
+  at start-up, since they cover every kind of tab, not just terminals. Your choices carry over.
+- Settings is a little larger, and its sizes now follow Windows' display scaling, so no page needs a sideways scroll
+  bar (the longest options were just wider than the page, more so on screens scaled above 100%).
+- Fixed: Remote Desktop tabs that lost their connection while the PC was locked or asleep kept trying (and counting
+  attempts, and running down their time limit) while nobody was there. Reconnecting now waits while Windows is locked
+  or asleep, and starts fresh on unlock or wake: attempt 1, straight away, including tabs that had given up.
+- Fixed: on the "connection lost" notice, Close tab sat a little lower than Reconnect now.
+
+## 3.23.0 (2026-11-26)
 
 - Add disks (Server window > Disks): several disks in one go, each with its own size, type, IOPS and throughput (gp3 at
-  3,000 / 125 to start, with AWS's limits checked as you type), named after the server and drive letter ("LGCSQL16-1 -
+  3,000 / 125 to start, with AWS's limits checked as you type), named after the server and drive letter ("SQL01 -
   E"), encrypted with a KMS key (your customer-managed keys listed, the account's EBS default or the key you used last
   selected), tagged (the server's tags offered to copy), and attached, with each disk's cost and the total shown first.
   Delete on termination stays off. Formatting is left to the operating system.
@@ -18,12 +38,12 @@ PATCH for fixes, MINOR for new features, MAJOR for changes that break existing s
   (refused while an image needs it). Cleanup: unattached volumes newest first (for disks made by mistake) and
   snapshots whose volume is gone, with what they cost.
 
-## 3.22.1 (2026-12-12)
+## 3.22.1 (2026-11-26)
 
 - Fixed: a tab's tooltip stayed up after the mouse moved off the tab onto the session below it, until clicked. It now
   goes as soon as the cursor isn't over that tab, whatever it's over instead.
 
-## 3.22.0 (2026-12-11)
+## 3.22.0 (2026-11-26)
 
 - Tabs have tooltips: hovering a remote tab shows the same card as the server list (status, instance ID, region, tags
   ...), with how the tab is connected (Remote Desktop, SSH or VNC, through Session Manager, as which user) and its
@@ -41,14 +61,14 @@ PATCH for fixes, MINOR for new features, MAJOR for changes that break existing s
   you sign in. Reconnect now on a placeholder still connects it straight away. A tab reconnects inside its
   placeholder's own tab, so nothing moves and the screen doesn't flash.
 
-## 3.21.0 (2026-12-09)
+## 3.21.0 (2026-11-25)
 
 - Tabs share the strip like a browser's: up to 240 pixels each, all narrowing together as more open (long titles
   shortened, the badge and × always shown), down to 120 pixels. The scroll arrows only appear past that.
 - The + is the last slot in the strip, so it's never on top of a tab: scrolled to the end, the last tab and its × are
   fully visible, with the + after them. It's drawn like a tab's ×: an accent-coloured circle under the mouse.
 
-## 3.20.1 (2026-12-08)
+## 3.20.1 (2026-11-25)
 
 - Fixed: with more tabs than fit, the tab strip's scroll arrows weren't themed and covered the + button. They're drawn
   in the theme's colours now (with a themed highlight under the mouse), and the + sits just to their left.
@@ -58,7 +78,7 @@ PATCH for fixes, MINOR for new features, MAJOR for changes that break existing s
 - Fixed: menus opened near the edge of a screen (the + menus, a tab's right-click menu, the column menu) could open
   across onto the next screen. They now open leftwards or upwards to stay on the screen they were opened on.
 
-## 3.20.0 (2026-12-07)
+## 3.20.0 (2026-11-23)
 
 - VNC in tabs. Saved connections can be VNC (default port 5900), and AWS servers have Connect with VNC on their
   right-click menu, through a Session Manager tunnel like the rest. The remote screen fits the tab; its password (and
@@ -74,13 +94,13 @@ PATCH for fixes, MINOR for new features, MAJOR for changes that break existing s
   a connection, Manage server ...) or another app came forward while it was showing. It now hides whenever
   Switchboard's main window stops being the active one, and as soon as the cursor leaves the list.
 
-## 3.19.1 (2026-12-06)
+## 3.19.1 (2026-11-23)
 
 - Release notes look the part: the update notice's What's new and Settings > About > What's new show a header, each
   version as a heading with its date, bullets with proper indents, "Fixed:" items tagged FIXED, and bold and code
   formatted, in the app's theme and font. The update notice's notes have an Update now button.
 
-## 3.19.0 (2026-12-05)
+## 3.19.0 (2026-11-23)
 
 - Fake bold throughout: with an app font that has no bold style, bold text everywhere (headings in Settings and the
   dialogs, the Server window's selected page, the New server wizard's titles, the Settings terminal preview) is drawn
@@ -92,7 +112,7 @@ PATCH for fixes, MINOR for new features, MAJOR for changes that break existing s
 - New server: the steps are a column down the left, like Settings and the Server window, with the current step
   highlighted. Clicking an earlier step goes back to it; a later one goes forward through each screen's checks.
 
-## 3.18.1 (2026-12-04)
+## 3.18.1 (2026-11-23)
 
 - Fixed: server tooltips didn't follow the cursor down the list. Windows' own list tooltips appear under the cursor and
   took the mouse when it moved onto them, so the list stopped noticing which server was under the cursor. The list now
@@ -107,7 +127,7 @@ PATCH for fixes, MINOR for new features, MAJOR for changes that break existing s
 - Bold menu items (the tray's Open Switchboard, Connect on a server's right-click menu) stay bold with an app font
   that has no bold style: menus draw a fake bold (the text again, a pixel to the right), as browsers do.
 
-## 3.18.0 (2026-12-03)
+## 3.18.0 (2026-11-23)
 
 - Send Ctrl+Alt+Del on a Remote Desktop tab's right-click menu (while connected): opens the server's security screen
   (lock, sign out, change password, Task Manager), or its sign-in at a lock screen. Pressing Ctrl+Alt+Del yourself
@@ -115,7 +135,7 @@ PATCH for fixes, MINOR for new features, MAJOR for changes that break existing s
 - Password fields (Settings > RDP credentials, the connection editor, Connect as) have an eye button: click it to show
   the password and check it for typos before saving, and again to hide it.
 
-## 3.17.1 (2026-12-02)
+## 3.17.1 (2026-11-20)
 
 - Fixed: a Remote Desktop tab closed as soon as its connection dropped, even when that was a network blip (switching
   from cable to Wi-Fi, sleep, a dead tunnel) or the server restarting. Now only a deliberate end closes it: signing
@@ -125,7 +145,7 @@ PATCH for fixes, MINOR for new features, MAJOR for changes that break existing s
   when the network comes back, and a wait while there's no network or the AWS sign-in has expired. Windows keeps the
   session on the server, so it comes back as it was.
 
-## 3.17.0 (2026-12-01)
+## 3.17.0 (2026-11-20)
 
 - Per-monitor display scaling: Switchboard now draws its windows natively at each screen's own scaling instead of
   having Windows stretch them. Fixed: a maximized window could fall a pixel short of the screen's edges (a line of
@@ -133,7 +153,7 @@ PATCH for fixes, MINOR for new features, MAJOR for changes that break existing s
   on screens whose scaling differs from the main one at sign-in, or after the scaling changed. Windows look the same as
   before on the screen they open on, and rescale when moved to a screen with different scaling.
 
-## 3.16.0 (2026-11-30)
+## 3.16.0 (2026-11-17)
 
 - Reconnect on a tab's right-click menu: for a session left stale, for example after Windows was locked long enough
   for its tunnel to time out. Remote Desktop gets a fresh connection and tunnel with the same user (including a
@@ -143,7 +163,7 @@ PATCH for fixes, MINOR for new features, MAJOR for changes that break existing s
   PowerShell 7, Git Bash, WSL and Claude Code each look like themselves (read from the program, as Windows shows it).
   The shell menus show the same icons. Shells without an icon of their own keep the terminal glyph.
 
-## 3.15.0 (2026-11-29)
+## 3.15.0 (2026-11-17)
 
 - Remote tabs show where they connect, as a small badge before the name: AWS (in AWS orange) for servers reached
   through Session Manager, RDP or SSH (in the accent colour) for saved connections. Before the name, so long names
@@ -152,13 +172,13 @@ PATCH for fixes, MINOR for new features, MAJOR for changes that break existing s
   every 5 seconds", on by default), with the time it was taken under it. It stops when another page is shown or the
   window closes.
 
-## 3.14.0 (2026-11-28)
+## 3.14.0 (2026-11-16)
 
 - Tabs can be rearranged: drag a tab along the strip (main tabs and the docked panel), or right-click it > Move left /
   Move right. Remote Desktop tabs stay connected while moving: tabs are reordered without taking their page out of
   the window. The new order is what's restored next time.
 
-## 3.13.1 (2026-11-27)
+## 3.13.1 (2026-11-13)
 
 - The layout is remembered: the window's position, size and maximized state (on whichever screen it was, or the
   default if that screen is gone), along with the columns, the list width and the docked panel's height. It's saved a
@@ -167,7 +187,7 @@ PATCH for fixes, MINOR for new features, MAJOR for changes that break existing s
   normally, and a Windows shutdown or restart with sessions open stopped at the "close them and exit?" question until
   Windows ended the app. Now a Windows shutdown or sign-out saves the layout and tabs and closes without asking.
 
-## 3.13.0 (2026-11-26)
+## 3.13.0 (2026-11-13)
 
 Everything since 3.7.0:
 
@@ -225,7 +245,7 @@ Everything since 3.7.0:
     initialized and formatted (GPT, NTFS, next free letter) straight away.
   - Detach a disk (not the system disk); the disk is kept and can be attached again.
 
-## 3.7.0 (2026-11-20)
+## 3.7.0 (2026-11-13)
 
 - Server window (right-click an AWS server > Manage server, or Server > Manage server), with its pages on the left:
   - Overview: instance type, state, zone, platform, image, launch time, IP addresses, instance profile, key pair,
@@ -238,13 +258,13 @@ Everything since 3.7.0:
     detailed monitoring.
   More pages follow in later versions.
 
-## 3.6.0 (2026-11-19)
+## 3.6.0 (2026-11-13)
 
 - Allow only one copy of Switchboard (Settings > Appearance > Window, on by default): starting Switchboard again
   brings the open window to the front (from the tray or minimized too) instead of opening a second copy. One copy per
   Windows session, so each user on a shared server has their own. Untick it to run several copies.
 
-## 3.5.0 (2026-11-19)
+## 3.5.0 (2026-11-13)
 
 - Connect as (right-click a server): connect with another user, in a tab of its own (titled with the user), even when
   you're already connected as yourself. Remote Desktop: DOMAIN\user or user@domain and an optional password; left
@@ -252,7 +272,7 @@ Everything since 3.7.0:
   tab only, unless "Save the password" stores it in Windows Credential Manager. SSH: the login name (the password or
   key is entered in the terminal). Reconnecting the tab keeps its user. Recently used users are offered in a list.
 
-## 3.4.0 (2026-11-18)
+## 3.4.0 (2026-11-12)
 
 - System tray options (Settings > Appearance > Window), both off by default: Minimize to the system tray, and Close to
   the system tray (the close button keeps Switchboard running). Sessions, tunnels and sign-in renewal carry on in the
@@ -263,7 +283,7 @@ Everything since 3.7.0:
   "Don't ask me again" (which sets the option) and a note that it can be changed in Settings. Without the tick, the
   answer is for that time only. Choosing the option in Settings means it isn't asked.
 
-## 3.3.0 (2026-11-17)
+## 3.3.0 (2026-11-12)
 
 - New server is now a four-screen wizard (Back / Next):
   1. Server: region, image, instance type with its on-demand price (per hour and per month, for the image's OS;
@@ -282,7 +302,7 @@ Everything since 3.7.0:
   its addresses.
 - Prices come from the AWS Pricing API (needs pricing:GetProducts) and are kept for three days.
 
-## 3.2.0 (2026-11-16)
+## 3.2.0 (2026-11-10)
 
 - New server (AWS > New server): create an EC2 server from one screen. Image: AWS's current Windows Server, Amazon
   Linux and Ubuntu builds, or your own images (newest first). Instance type: every type that can run the image, with
@@ -300,11 +320,11 @@ Everything since 3.7.0:
   the release page instead. Settings > About turns the daily check off; administrators can turn it off with
   DisableUpdateCheck = 1 under HKLM or HKCU\SOFTWARE\Policies\SwitchboardRM.
 
-## 3.1.1 (2026-11-15)
+## 3.1.1 (2026-11-10)
 
 - Fixed: the toolbar terminal button's dropdown didn't use the app font (Settings > Appearance) like the other menus.
 
-## 3.1.0 (2026-11-15)
+## 3.1.0 (2026-11-10)
 
 - Claude in the shell menus (the terminal button's arrow, the + menus, File > Open shell), in a group of its own:
   - Claude Code, Anthropic's command-line agent, in a terminal tab when it's installed (native installer or npm). It
@@ -315,14 +335,14 @@ Everything since 3.7.0:
     pop-ups; other links open in your normal browser. It closes without asking and isn't counted as an open shell
     when Switchboard exits.
 
-## 3.0.2 (2026-11-14)
+## 3.0.2 (2026-11-10)
 
 - WSL distributions installed or removed while Switchboard is running now show up in the shell menus (the terminal
   button's arrow, the + menus, File > Open shell): the list is checked again each time a menu opens, and an open menu
   updates itself if it changed.
 - When a shell or SSH session has ended, Esc closes its tab, as Enter starts it again (the message says so).
 
-## 3.0.1 (2026-11-14)
+## 3.0.1 (2026-11-10)
 
 - Fixed: "Keep me signed in" on the toolbar could still be cut short ("Keep me s..."), especially with a wider app
   font. The extra room added in 2.18.6 was taken away again when the text was drawn; checkboxes now draw their text in
@@ -331,7 +351,7 @@ Everything since 3.7.0:
 - The log no longer grows without limit: when app.log passes 10 MB it becomes app.1.log (replacing the previous one)
   and a new app.log starts, so logs take at most about 20 MB.
 
-## 3.0.0 (2026-11-13)
+## 3.0.0 (2026-11-10)
 
 - Microsoft sign-in is built in, and is now the only Microsoft sign-in: Switchboard's own sign-in window, on
   Microsoft's WebView2 engine (kept up to date by Windows). aws-azure-login, Node.js and Puppeteer's Chromium are no
@@ -346,18 +366,18 @@ Everything since 3.7.0:
   update-tools.ps1 no longer checks them; the GitHub build no longer installs them, and checks they're not in the
   release.
 
-## 2.21.2 (2026-11-12)
+## 2.21.2 (2026-11-10)
 
 - The AWS servers tab's tooltips show each server's instance ID and region, under its name.
 
-## 2.21.1 (2026-11-12)
+## 2.21.1 (2026-11-10)
 
 - Edit profile: a button next to Add and Remove in Settings > AWS profile, and in the AWS menu, opening the selected
   profile's sign-in settings (it replaces the separate Sign-in settings section).
 - Fixed: the profile list and its buttons no longer make Settings > AWS profile scroll sideways. The list now spans
   the page, with Edit, Add and Remove underneath it.
 
-## 2.21.0 (2026-11-12)
+## 2.21.0 (2026-11-10)
 
 - Profile setup is now entirely in the app, with no terminal windows. Add profile asks for a name and sign-in type,
   then shows that type's settings form; AWS > Profile sign-in settings, Settings > AWS profile > Sign-in settings and
@@ -370,7 +390,7 @@ Everything since 3.7.0:
   CLI and SDKs read. Sign-in still uses "aws sso login".
 - Only the profile's own settings change in ~/.aws/config; everything else in the file is kept as it was.
 
-## 2.20.0 (2026-11-12)
+## 2.20.0 (2026-11-10)
 
 - Built-in Microsoft sign-in (preview), in Settings > AWS profile: signs in with Switchboard's own sign-in window,
   using Microsoft's WebView2 browser engine (kept up to date by Windows), instead of aws-azure-login and its 2022
@@ -381,7 +401,7 @@ Everything since 3.7.0:
   loads, so it can't go on to the AWS console. Several AWS roles: the profile's default, otherwise you choose. Each
   step is in the log. aws-azure-login stays the default for now; SSO profiles are unaffected.
 
-## 2.19.0 (2026-11-11)
+## 2.19.0 (2026-11-09)
 
 - An installer: releases now include SwitchboardRM-Setup-<version>.exe (signed, like the app) alongside the zip. It
   offers "Install for me only" (no admin rights; %LocalAppData%\Programs) or "Install for all users" (admin; Program
@@ -389,7 +409,7 @@ Everything since 3.7.0:
   (closing Switchboard first), and installs silently with /VERYSILENT /ALLUSERS or /CURRENTUSER. Uninstalling keeps
   your settings. The app itself is unchanged.
 
-## 2.18.6 (2026-11-10)
+## 2.18.6 (2026-11-09)
 
 - Fixed: Ctrl+Alt+Left / Ctrl+Alt+Right didn't switch tabs while a remote desktop had the keyboard. The Remote Desktop
   control reads the keyboard outside Switchboard's own message handling, so these keys are now taken by a low-level
@@ -398,13 +418,13 @@ Everything since 3.7.0:
   Ctrl+arrow still moves by word in the remote session).
 - The toolbar's "Keep me signed in" checkbox is 100 px wider.
 
-## 2.18.5 (2026-11-10)
+## 2.18.5 (2026-11-09)
 
-- SwitchboardRM.exe is now code-signed (SHA-256, timestamped) with LaPrairie Group's code-signing certificate, so
+- SwitchboardRM.exe is now code-signed (SHA-256, timestamped) with an organisational code-signing certificate, so
   Windows shows a known publisher on the organisation's PCs. Release builds of main are signed automatically; no
   changes to the app itself.
 
-## 2.18.4 (2026-11-10)
+## 2.18.4 (2026-11-09)
 
 - Fixed properly: sign-in going on to the AWS console in the sign-in window instead of completing (2.18.3 made it
   worse, especially when the Microsoft session was remembered). The cause was a race in aws-azure-login's window
@@ -412,7 +432,7 @@ Everything since 3.7.0:
   Microsoft's hand-off to AWS, so a quick sign-in could finish first. The sign-in window now opens on a small local
   page, aws-azure-login turns its interception on, and only then does the window go to the Microsoft sign-in page.
 
-## 2.18.3 (2026-11-10)
+## 2.18.3 (2026-11-09)
 
 - Fixed: the first sign-in sometimes opened the AWS console in the small sign-in window instead of finishing. When
   Chromium started slowly (a new or changed sign-in profile), aws-azure-login watched the wrong browser tab for the
@@ -439,7 +459,7 @@ Everything since 3.7.0:
   Puppeteer's Chromium download isn't skipped, downloads it explicitly if it's missing, and fails rather than publish
   a release without it.
 
-## 2.18.0 (2026-11-07)
+## 2.18.0 (2026-11-09)
 
 - Windows sign-in windows (WAM) now appear for commands in Switchboard's terminals, such as Connect-MgGraph and
   Connect-AzAccount, keeping single sign-on, device-based Conditional Access and token protection. Terminals use
@@ -452,26 +472,26 @@ Everything since 3.7.0:
   copies of update-tools.ps1 and collect-tools.ps1 inside the app. Release builds bundle the tools, so users don't
   need them installed or updated themselves; the scripts stay in the project for maintainers.
 
-## 2.17.2 (2026-11-06)
+## 2.17.2 (2026-11-05)
 
 - Fixed: when Puppeteer's own Chromium was missing or incomplete, sign-in still failed ("Failed to launch the browser
   process"). The fallback browser (tools\chromium or Microsoft Edge) was passed in a setting aws-azure-login never
   reads; it's now passed as PUPPETEER_EXECUTABLE_PATH, which Puppeteer uses. The same check now covers an installed
   (not bundled) aws-azure-login. The log says which browser sign-in uses when it isn't Puppeteer's own.
 
-## 2.17.1 (2026-11-06)
+## 2.17.1 (2026-11-05)
 
 - Fixed: sign-in failed with "Failed to launch the browser process" when Puppeteer's Chromium in the tools folder was
   incomplete (its folder there, but no chrome.exe). Switchboard now checks for chrome.exe itself and otherwise uses
   tools\chromium or Microsoft Edge. collect-tools.ps1 warns when it collects an incomplete Chromium.
 
-## 2.17.0 (2026-11-06)
+## 2.17.0 (2026-11-05)
 
 - Saved connections have a Description: a field in the Add/Edit and Connect dialogs, and a Description column on the
   Saved tab (sortable, searched, shown in full in the row's tooltip). It's added to an existing column layout once.
 - Imports bring descriptions along where the other tool has them: RDCMan's comment and mRemoteNG's description.
 
-## 2.16.0 (2026-11-06)
+## 2.16.0 (2026-11-05)
 
 - Update the helper tools from inside Switchboard: Help > Check for tool updates (report only) and Help > Update
   helper tools (also on Settings > About). update-tools.ps1 runs in a tab, so its progress can be watched: it updates
@@ -480,12 +500,12 @@ Everything since 3.7.0:
 - update-tools.ps1 and collect-tools.ps1 are built into Switchboard: if either is missing from its folder, it's written
   back before running (an edited copy is left as it is).
 
-## 2.15.1 (2026-11-06)
+## 2.15.1 (2026-11-05)
 
 - Fixed: Settings showed "Terminal _SSH" instead of "Terminal & SSH" (Windows drew the "&" as a keyboard-shortcut
   underline). Settings text now shows "&" as written.
 
-## 2.15.0 (2026-11-05)
+## 2.15.0 (2026-11-04)
 
 - Nothing outlives Switchboard: every tunnel, ssh, shell and sign-in helper it starts is tied to it (a Windows job
   object), so they all end when Switchboard does, including when it crashes or is killed from Task Manager. AWS
@@ -493,19 +513,19 @@ Everything since 3.7.0:
 - Clean-up after a crash: if the last run didn't close cleanly, Switchboard removes the AWS keys it left behind when
   it next starts (with "Sign out of AWS when Switchboard closes" on), before anything else.
 
-## 2.14.2 (2026-11-05)
+## 2.14.2 (2026-11-04)
 
 - Fixed: after sleep or unlocking, parts of the window sometimes stayed blank until hovered. Switchboard now redraws
   all its windows (and their title bars) itself after waking, unlocking or a display change, and again a few
   seconds later once the display has settled.
 
-## 2.14.1 (2026-11-05)
+## 2.14.1 (2026-11-04)
 
 - Fixed: the taskbar sometimes showed the generic app icon instead of Switchboard's, especially after unlocking the
   PC. The icon is now also set as the window class's icon (what the taskbar falls back to when the app is busy),
   and re-sent after unlocking, waking, display changes and display-scaling changes.
 
-## 2.14.0 (2026-11-05)
+## 2.14.0 (2026-11-03)
 
 - Terminal colour schemes, in Settings > Appearance > Terminal colours: Match app (the default), Dracula, Campbell,
   One Half Dark, One Half Light, Solarized Dark, Solarized Light, Nord, Gruvbox Dark and Tokyo Night. A scheme sets
@@ -516,18 +536,18 @@ Everything since 3.7.0:
   so execution policy doesn't block it (Windows PowerShell 5.1 gets the parts it supports), and a prompt from your
   profile is kept.
 
-## 2.13.1 (2026-11-05)
+## 2.13.1 (2026-11-03)
 
 - Fixed: clicking the docked terminals' expand arrow sometimes expanded the panel and immediately collapsed it
   again (the click reached both the arrow and the strip). Each click now acts once.
 
-## 2.13.0 (2026-11-05)
+## 2.13.0 (2026-11-03)
 
 - Collapsing the docked terminals now leaves their header strip at the bottom ("Docked terminals (2)") with an up
   arrow, instead of the panel disappearing. Click the arrow or the strip (or press Ctrl+`) to expand it again; the
   terminals keep running while collapsed. The panel only goes away completely when nothing is docked.
 
-## 2.12.0 (2026-11-04)
+## 2.12.0 (2026-11-03)
 
 - Fonts folder: .ttf, .otf and .ttc files in a "fonts" folder next to SwitchboardRM.exe are loaded when Switchboard
   starts, for Switchboard only (nothing is installed in Windows). They appear in Settings > Appearance as
@@ -535,24 +555,24 @@ Everything since 3.7.0:
   Weights come from the file names (Regular, Bold, SemiBold, Italic ...). Publishing copies the project's fonts\
   folder into output\fonts\.
 
-## 2.11.0 (2026-11-04)
+## 2.11.0 (2026-11-03)
 
 - Connect to any computer without saving it first: "Remote Desktop to a computer ..." at the top of the + menu on
   the main tabs, and Server > Connect to a computer. Enter the computer (and optionally a user and password) and
   connect, by Remote Desktop or SSH. Nothing is saved unless "Add to saved connections" is ticked; a password typed
   for a one-off connection is only kept in memory for that tab.
 
-## 2.10.1 (2026-11-04)
+## 2.10.1 (2026-11-03)
 
 - Fixed: the + after the last tab (on the main tabs and in the docked panel) did nothing and didn't highlight.
   Clicks in the empty part of the tab strip now reach it.
 
-## 2.10.0 (2026-11-04)
+## 2.10.0 (2026-11-03)
 
 - Settings > Terminal & SSH > Open new terminals docked: new shells and SSH sessions open in the docked panel
   instead of a tab of their own. Move back to a tab still works on any of them.
 
-## 2.9.0 (2026-11-04)
+## 2.9.0 (2026-11-03)
 
 - Docked terminals: right-click a shell or SSH tab and choose Dock to bottom to put it in a panel under the tabs,
   so it's visible alongside a remote desktop (which resizes to make room rather than being covered). It carries on

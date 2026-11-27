@@ -18,8 +18,9 @@ internal sealed class Session
     public VncHost Vnc;          // VNC tabs (noVNC through a local relay)
     public bool VncTriedSaved;   // the saved VNC password was already offered this time
     public string VncProblem = "";
-    public bool Docked;          // in the docked-terminal panel under the tabs, not a tab of its own
+    public bool Docked;          // in the docked-terminal panel under the tabs, not a tab of its own (popped out: where it goes back to)
     public TabPage Page;
+    public PopoutForm Popout;    // in a window of its own: the controls are in Popout.Body, Page is out of the strips
     public DateTime Started = DateTime.Now;
     public bool SawActivity;
     public bool WasConnected;
@@ -27,6 +28,8 @@ internal sealed class Session
     // Remote Desktop: how it last disconnected, and reconnecting after a lost connection
     public int DisconnectReason = -1, ExtendedReason;
     public bool Reconnecting;
+    public int ReconnectAttempt;          // this round's attempts (restarted on unlock / wake)
+    public DateTime ReconnectUntil;       // when this round gives up (pushed on while locked or asleep)
     public Panel Overlay;
     public TaskCompletionSource<bool> RetryNow;
     /// <summary>Connect as: this tab's own user (and typed password, kept in memory only); null = the usual credentials.</summary>
@@ -126,6 +129,7 @@ internal sealed class MainForm : Form
     private readonly ToolStripButton _btnCloseDocked = new(Icons.CloseX) { Alignment = ToolStripItemAlignment.Right, ToolTipText = "Close this terminal" };
     private readonly ToolStripMenuItem _miDock = new("Docked &terminals") { ShortcutKeyDisplayString = "Ctrl+`" };
     private readonly ToolStripMenuItem _tabMenuDock = new("Dock to bottom");
+    private readonly ToolStripMenuItem _tabMenuPopout = new("Pop out to own window");
     private readonly ToolStripMenuItem _tabMenuReconnect = new("&Reconnect");
     private readonly ToolStripMenuItem _tabMenuCad = new("Send Ctrl+Alt+&Del");
     private readonly ToolStripMenuItem _tabMenuPaste = new("Send clipboard text");
@@ -312,6 +316,7 @@ internal sealed class MainForm : Form
         _hint.ForeColor = Theme.Current.Muted;
         RenderActionIcons();
         foreach (var s in _sessions) s.Term?.ApplyTheme();
+        foreach (var s in _sessions) s.Popout?.ApplyTheme();
         _chkKeep.BackColor = Theme.Current.Raised; // sits on the toolbar, not the window background
         _chkKeep.ForeColor = Theme.Current.Text;
         _chkKeep.Invalidate();
@@ -607,6 +612,7 @@ internal sealed class MainForm : Form
         _tabMenu.Items.Add(_tabMenuLeft);
         _tabMenu.Items.Add(_tabMenuRight);
         _tabMenu.Items.Add(new ToolStripSeparator());
+        _tabMenu.Items.Add(_tabMenuPopout);
         _tabMenu.Items.Add(_tabMenuDock);
         _tabMenu.Items.Add("Close tab", null, (_, _) => { if (_menuTarget != null) CloseSession(_menuTarget); });
         _tabMenu.Opening += (_, e) =>
@@ -636,28 +642,7 @@ internal sealed class MainForm : Form
             _menuTarget.Vnc.SendClipboard(text);
             SetStatus($"Sent {text.Length:N0} characters to {_menuTarget.Inst.Name}'s clipboard: paste them there.");
         };
-        _tabMenuCad.Click += (_, _) =>
-        {
-            var target = _menuTarget;
-            if (target?.Vnc != null)
-            {
-                target.Vnc.SendCtrlAltDel();
-                SetStatus($"Sent Ctrl+Alt+Del to {target.Inst.Name}.");
-                return;
-            }
-            if (target?.Rdp == null) return;
-            _tabs.SelectedTab = target.Page;   // the session needs to be the one on screen to take the keys
-            try
-            {
-                target.Rdp.SendCtrlAltDel();
-                SetStatus($"Sent Ctrl+Alt+Del to {target.Inst.Name} (Ctrl+Alt+End does the same from the keyboard).");
-            }
-            catch (Exception ex)
-            {
-                Log.Write("Ctrl+Alt+Del not sent: " + ex.Message);
-                SetStatus($"Ctrl+Alt+Del couldn't be sent: {ex.Message}. Click into the session and press Ctrl+Alt+End instead.");
-            }
-        };
+        _tabMenuCad.Click += (_, _) => SendCtrlAltDel(_menuTarget);
         _placeholderMenu.Items.Add("&Reconnect", null, async (_, _) => { if (_placeholderTarget != null) await ActivatePlaceholderAsync(_placeholderTarget); });
         _placeholderMenu.Items.Add("Close tab", null, (_, _) =>
         {
@@ -670,6 +655,7 @@ internal sealed class MainForm : Form
         _tabMenuLeft.Click += (_, _) => MoveTabBy(_menuTarget, -1);
         _tabMenuRight.Click += (_, _) => MoveTabBy(_menuTarget, +1);
         _tabs.TabsReordered += () => Log.Write("Tabs reordered");
+        _tabMenuPopout.Click += (_, _) => PopOut(_menuTarget);   // a window of its own, beside the main window
         _tabMenuDock.Click += (_, _) =>
         {
             if (_menuTarget == null) return;
@@ -1283,7 +1269,7 @@ internal sealed class MainForm : Form
         string openingKey = $"{inst.Id}|{protocol}|{asUser}";
         // Connect as always opens its own tab (it's usually alongside a session as yourself)
         var existing = asUser != null ? null : _sessions.FirstOrDefault(s => s.Inst.Id == inst.Id && s.Kind == protocol && s.AsUser == null);
-        if (existing != null) { _tabs.SelectedTab = existing.Page; return; }
+        if (existing != null) { ShowSession(existing); return; }
         if (!_opening.Add(openingKey)) return;
 
         try
@@ -1365,7 +1351,10 @@ internal sealed class MainForm : Form
                 { BackColor = Theme.Current.Back, Tag = ThemedTabControl.BadgeTag(BadgeFor(inst, Protocol.Rdp)) };
             var host = new RdpHost(clsid) { Dock = DockStyle.Fill };
             host.Enter += (_, _) => _tabKeys?.Install();   // stay ahead of the RDP control's own keyboard hook
-            host.FocusReleased += direction => SwitchTab(direction < 0 ? -1 : +1);   // Ctrl+Alt+Left / Right
+            host.FocusReleased += direction =>   // Ctrl+Alt+Left / Right (a popped-out one has no tabs to switch)
+            {
+                if (_sessions.FirstOrDefault(x => x.Rdp == host)?.Popout == null) SwitchTab(direction < 0 ? -1 : +1);
+            };
             page.Controls.Add(host);
             page = ShowSessionTab(page);   // replacing a placeholder: its own tab is reused
 
@@ -1476,6 +1465,7 @@ internal sealed class MainForm : Form
     private void OnAppShortcut(string key, Session from)
     {
         bool docked = from is { Docked: true };
+        if (from?.Popout != null && key is "next" or "prev" or "dock") return;   // its own window: no tabs there
         switch (key)
         {
             case "next": SwitchTabIn(docked ? _dockTabs : _tabs, +1); break;
@@ -1559,6 +1549,167 @@ internal sealed class MainForm : Form
         if (_dockTabs.TabCount == 0) ShowDock(false); else UpdateDockTitle();
         s.Term?.FocusTerminal();
     }
+
+    // ---------------------------------------------------------------- popped-out windows
+
+    /// <summary>Where a session's controls are: its tab page, or its own window's body when popped out.</summary>
+    private Control ContentHost(Session s) => s.Popout != null ? s.Popout.Body : s.Page;
+
+    /// <summary>Bring a session to the front: its own window if popped out, otherwise its tab.</summary>
+    private void ShowSession(Session s)
+    {
+        if (s == null) return;
+        if (s.Popout != null)
+        {
+            if (s.Popout.WindowState == FormWindowState.Minimized) s.Popout.WindowState = FormWindowState.Normal;
+            s.Popout.Activate();
+            return;
+        }
+        if (s.Docked) { _dockTabs.SelectedTab = s.Page; ShowDock(true); }
+        else _tabs.SelectedTab = s.Page;
+    }
+
+    /// <summary>Ctrl+Alt+Del into a Remote Desktop or VNC session (tab menu, or a popped-out window's toolbar).</summary>
+    private void SendCtrlAltDel(Session target)
+    {
+        if (target?.Vnc != null)
+        {
+            target.Vnc.SendCtrlAltDel();
+            SetStatus($"Sent Ctrl+Alt+Del to {target.Inst.Name}.");
+            return;
+        }
+        if (target?.Rdp == null) return;
+        ShowSession(target);   // the session needs to be the one on screen to take the keys
+        try
+        {
+            target.Rdp.SendCtrlAltDel();
+            SetStatus($"Sent Ctrl+Alt+Del to {target.Inst.Name} (Ctrl+Alt+End does the same from the keyboard).");
+        }
+        catch (Exception ex)
+        {
+            Log.Write("Ctrl+Alt+Del not sent: " + ex.Message);
+            SetStatus($"Ctrl+Alt+Del couldn't be sent: {ex.Message}. Click into the session and press Ctrl+Alt+End instead.");
+        }
+    }
+
+    /// <summary>Start-up: a session that was popped out last time goes back into a window of its own, where it was.</summary>
+    private void PopOutRestored(TabPage page, TabState tab)
+    {
+        var s = page == null ? null : _sessions.FirstOrDefault(x => x.Page == page);
+        if (s == null) return;
+        Rectangle? bounds = null;
+        if (tab.WindowBounds is { Length: 4 } b && b[2] >= 200 && b[3] >= 150)
+        {
+            var r = new Rectangle(b[0], b[1], b[2], b[3]);
+            // at least a decent part of it on a screen that's connected now (a monitor may have gone), as for the main window
+            if (Screen.AllScreens.Any(sc =>
+                {
+                    var overlap = Rectangle.Intersect(sc.WorkingArea, r);
+                    return overlap.Width >= 200 && overlap.Height >= 150;
+                }))
+                bounds = r;
+        }
+        PopOut(s, bounds, tab.WindowMaximized, tab.WindowFullScreen, tab.WindowOnTop, activate: false);
+    }
+
+    /// <summary>
+    /// Move a session (any kind, main tab or docked) into a window of its own. Its controls move, not its tab page: the
+    /// window and its body get their handles first, the controls are moved into the body (Windows re-parents their
+    /// existing windows, so the connection carries on), and only then does the now-empty page leave its strip.
+    /// Without saved bounds, the window takes the size of the tab's area, a little down and right of it.
+    /// </summary>
+    private void PopOut(Session s, Rectangle? bounds = null, bool maximized = false, bool fullScreen = false, bool onTop = false, bool activate = true)
+    {
+        if (s == null || s.Popout != null || s.Page == null) return;
+        var strip = s.Docked ? _dockTabs : _tabs;
+        if (!strip.TabPages.Contains(s.Page)) return;
+
+        var window = new PopoutForm(s);
+        if (bounds is { } saved) window.Bounds = saved;
+        else
+        {
+            var area = strip.IsHandleCreated && strip.Visible ? strip.RectangleToScreen(s.Page.Bounds) : RectangleToScreen(ClientRectangle);
+            window.Bounds = new Rectangle(area.X + LogicalToDeviceUnits(40), area.Y + LogicalToDeviceUnits(20),
+                Math.Max(area.Width, LogicalToDeviceUnits(640)), Math.Max(area.Height, LogicalToDeviceUnits(400)) + LogicalToDeviceUnits(30));
+        }
+        if (maximized) window.WindowState = FormWindowState.Maximized;
+        window.ReturnRequested += w => ReturnFromPopout(w.Session);
+        window.CloseRequested += (w, ask) => { if (ask) CloseWithConfirm(w.Session); else CloseSession(w.Session); };
+        window.ReconnectRequested += async w => await ReconnectSessionAsync(w.Session);
+        window.CtrlAltDelRequested += w => SendCtrlAltDel(w.Session);
+        window.Activated += (_, _) => _tabKeys?.Install();   // stay ahead of the RDP control's own keyboard hook
+        if (onTop) window.SetOnTop(true);
+        window.Show();
+        _ = window.Body.Handle;
+
+        bool wasHidden = _createdHidden.Remove(s.Page);   // connected in the background and never shown yet
+        try
+        {
+            foreach (var c in s.Page.Controls.Cast<Control>().ToList()) window.Body.Controls.Add(c);
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"Pop out: couldn't move {s.Inst.Name}: {ex}");
+            foreach (var c in window.Body.Controls.Cast<Control>().ToList()) s.Page.Controls.Add(c);
+            window.ClosingQuietly = true;
+            window.Close();
+            SetStatus($"{s.Inst.Name} couldn't be moved to its own window: {ex.Message}");
+            return;
+        }
+        s.Popout = window;
+        strip.TabPages.Remove(s.Page);
+        UpdateMainTabsVisibility();
+        if (_dockTabs.TabCount == 0) ShowDock(false); else UpdateDockTitle();
+        Log.Write($"Popped out {s.Inst.Name} ({s.Kind})");
+        if (fullScreen) window.SetFullScreen(true);
+        AfterMove(s, window.Body, wasHidden, focus: activate);
+        if (activate) window.Activate();
+    }
+
+    /// <summary>Return to main window: the controls go back into the session's tab page, in the strip it came from.</summary>
+    private void ReturnFromPopout(Session s)
+    {
+        var window = s?.Popout;
+        if (window == null) return;
+        var strip = s.Docked ? _dockTabs : _tabs;
+        strip.TabPages.Add(s.Page);
+        _ = s.Page.Handle;   // the page needs its window before the controls' windows move into it
+        foreach (var c in window.Body.Controls.Cast<Control>().ToList()) s.Page.Controls.Add(c);
+        s.Popout = null;
+        window.ClosingQuietly = true;
+        window.Close();
+        window.Dispose();
+        if (s.Docked) { UpdateDockTitle(); ShowDock(true); } else UpdateMainTabsVisibility();
+        strip.SelectedTab = s.Page;
+        Log.Write($"Returned {s.Inst.Name} to the main window");
+        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+        Activate();
+        AfterMove(s, s.Page, false);
+    }
+
+    /// <summary>
+    /// After a move: size the remote desktop to its new home, repaint, and give it the keyboard. A remote desktop
+    /// connected in the background and never shown yet needs re-showing first, as on its first view in a tab.
+    /// </summary>
+    private void AfterMove(Session s, Control home, bool wasHidden, bool focus = true)
+    {
+        try
+        {
+            if (wasHidden)
+                foreach (Control c in home.Controls) { c.Visible = false; c.Visible = true; }
+            home.PerformLayout();
+            s.Rdp?.SyncSize();
+            RedrawWindow(home.Handle, IntPtr.Zero, IntPtr.Zero, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW);
+        }
+        catch (Exception ex) { Log.Write("After moving a session: " + ex.Message); }
+        s.Overlay?.BringToFront();
+        if (!focus) return;
+        s.Term?.FocusTerminal();
+        s.Web?.FocusPage();
+        s.Vnc?.FocusScreen();
+        if (s.Rdp != null) { try { s.Rdp.Focus(); } catch { } }
+    }
+
 
     private void UpdateMainTabsVisibility()
     {
@@ -1746,7 +1897,7 @@ internal sealed class MainForm : Form
         var open = _sessions.FirstOrDefault(x => x.Web != null);
         if (open != null)
         {
-            _tabs.SelectedTab = open.Page;
+            ShowSession(open);
             open.Web.FocusPage();
             return;
         }
@@ -2147,25 +2298,48 @@ internal sealed class MainForm : Form
             }
             var s = _sessions.FirstOrDefault(x => x.Page == page);
             if (s == null) continue;
-            var tab = new TabState { Name = s.Inst.Name, AsUser = s.AsUser, Docked = s.Docked };
-            if (s.Web != null) tab.Kind = "claude-web";
-            else if (s.Kind == Protocol.Local)
-            {
-                if (s.Inst.Type == "claude-code-install") continue;   // the installer isn't something to reopen
-                tab.Kind = "shell";
-                tab.ShellId = s.Inst.Type;
-            }
-            else
-            {
-                tab.Kind = s.Kind == Protocol.Ssh ? "ssh" : s.Kind == Protocol.Vnc ? "vnc" : "rdp";
-                if (s.Inst.IsSaved) tab.SavedId = s.Inst.Saved.Id;
-                else { tab.InstanceId = s.Inst.Id; tab.Region = s.Inst.Region; }
-            }
+            var tab = DescribeTab(s);
+            if (tab == null) continue;
             if (page == _tabs.SelectedTab) saved.Selected = saved.Tabs.Count;
             if (s.Term != null) terminals.Add((saved.Tabs.Count, s.Term));
             saved.Tabs.Add(tab);
         }
+        // popped-out sessions: after the tabs, with their windows' places
+        foreach (var s in _sessions.Where(x => x.Popout != null))
+        {
+            var tab = DescribeTab(s);
+            if (tab == null) continue;
+            var w = s.Popout;
+            var b = w.WindowedBounds;
+            tab.PoppedOut = true;
+            tab.WindowBounds = new[] { b.X, b.Y, b.Width, b.Height };
+            tab.WindowMaximized = w.WindowedMaximized;
+            tab.WindowFullScreen = w.FullScreen;
+            tab.WindowOnTop = w.TopMost;
+            if (s.Term != null) terminals.Add((saved.Tabs.Count, s.Term));
+            saved.Tabs.Add(tab);
+        }
         return (saved, terminals);
+    }
+
+    /// <summary>What to save to reopen a session next time; null for one that isn't reopened (the Claude Code installer).</summary>
+    private static TabState DescribeTab(Session s)
+    {
+        var tab = new TabState { Name = s.Inst.Name, AsUser = s.AsUser, Docked = s.Docked };
+        if (s.Web != null) tab.Kind = "claude-web";
+        else if (s.Kind == Protocol.Local)
+        {
+            if (s.Inst.Type == "claude-code-install") return null;   // the installer isn't something to reopen
+            tab.Kind = "shell";
+            tab.ShellId = s.Inst.Type;
+        }
+        else
+        {
+            tab.Kind = s.Kind == Protocol.Ssh ? "ssh" : s.Kind == Protocol.Vnc ? "vnc" : "rdp";
+            if (s.Inst.IsSaved) tab.SavedId = s.Inst.Saved.Id;
+            else { tab.InstanceId = s.Inst.Id; tab.Region = s.Inst.Region; }
+        }
+        return tab;
     }
 
     /// <summary>
@@ -2191,10 +2365,12 @@ internal sealed class MainForm : Form
                 if (tab.IsAws && _aws.Count == 0) { _pendingRestore.Add(tab); continue; }
                 if (tab.IsRemote)
                 {
-                    if (reconnects > 0) { reconnects--; page = await RestoreRemoteAsync(tab); }
+                    // a popped-out window reconnects now (a placeholder would be a tab, and it's not in one)
+                    if (reconnects > 0 || tab.PoppedOut) { reconnects--; page = await RestoreRemoteAsync(tab); }
                     else page = AddPlaceholder(tab);
                 }
                 else page = await RestoreLocalAsync(tab);
+                if (tab.PoppedOut) { PopOutRestored(page, tab); continue; }
                 if (tab == selected && page != null) selectPage = page;
             }
             catch (Exception ex) { Log.Write($"Couldn't reopen {tab.Name}: {ex.Message}"); }
@@ -2219,7 +2395,12 @@ internal sealed class MainForm : Form
         {
             try
             {
-                if (reconnects > 0) { reconnects--; await RestoreRemoteAsync(tab); }
+                if (reconnects > 0 || tab.PoppedOut)
+                {
+                    reconnects--;
+                    var page = await RestoreRemoteAsync(tab);
+                    if (tab.PoppedOut) PopOutRestored(page, tab);
+                }
                 else AddPlaceholder(tab);
             }
             catch (Exception ex) { Log.Write($"Couldn't reopen {tab.Name}: {ex.Message}"); }
@@ -3074,11 +3255,21 @@ internal sealed class MainForm : Form
         s.Reconnecting = true;
         Log.Write($"{s.Inst.Name}: connection lost (reason {s.DisconnectReason}, extended {s.ExtendedReason}); reconnecting");
         s.Page.Text = RdpTitle(s, " (reconnecting)");
-        var until = DateTime.Now.AddMinutes(10);
-        int attempt = 0;
-        while (s.Reconnecting && _sessions.Contains(s) && DateTime.Now < until)
+        s.ReconnectUntil = DateTime.Now.AddMinutes(10);
+        s.ReconnectAttempt = 0;
+        while (s.Reconnecting && _sessions.Contains(s) && DateTime.Now < s.ReconnectUntil)
         {
-            attempt++;
+            if (Away)
+            {
+                // locked or asleep: no point trying (often no network), and attempts and the give-up clock shouldn't
+                // run while nobody's there; unlocking or waking starts a fresh round at once (ResumeReconnects)
+                s.ReconnectUntil = DateTime.Now.AddMinutes(10);
+                ShowOverlay(s, $"The connection to {s.Inst.Name} was lost. Waiting until Windows is unlocked ...", waiting: true);
+                s.RetryNow = new TaskCompletionSource<bool>();
+                await Task.WhenAny(s.RetryNow.Task, Task.Delay(30000));
+                continue;
+            }
+            int attempt = ++s.ReconnectAttempt;
             if (!System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable())
             {
                 ShowOverlay(s, $"The connection to {s.Inst.Name} was lost. Waiting for the network to come back ...", waiting: true);
@@ -3121,7 +3312,7 @@ internal sealed class MainForm : Form
             }
             // wait before the next try (or less, if the network comes back or Reconnect now is clicked)
             s.RetryNow = new TaskCompletionSource<bool>();
-            await Task.WhenAny(s.RetryNow.Task, Task.Delay(attempt < 6 ? 5000 : 15000));
+            await Task.WhenAny(s.RetryNow.Task, Task.Delay(s.ReconnectAttempt < 6 ? 5000 : 15000));
         }
         if (!s.Reconnecting || !_sessions.Contains(s)) return;
         s.Reconnecting = false;
@@ -3150,7 +3341,7 @@ internal sealed class MainForm : Form
             var panel = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Current.Back };
             var label = new Label { AutoSize = true, UseMnemonic = false, ForeColor = Theme.Current.Text, Anchor = AnchorStyles.None, Margin = new Padding(0, 0, 0, 14), MaximumSize = new Size(LogicalToDeviceUnits(520), 0), TextAlign = ContentAlignment.TopCenter };
             var retry = new Button { Text = "Reconnect now", Tag = "primary", AutoSize = true, MinimumSize = new Size(LogicalToDeviceUnits(130), LogicalToDeviceUnits(32)), Margin = new Padding(0, 0, 8, 0) };
-            var close = new Button { Text = "Close tab", AutoSize = true, MinimumSize = new Size(LogicalToDeviceUnits(100), LogicalToDeviceUnits(32)) };
+            var close = new Button { Text = "Close tab", AutoSize = true, MinimumSize = new Size(LogicalToDeviceUnits(100), LogicalToDeviceUnits(32)), Margin = new Padding(0) };
             retry.Click += (_, _) =>
             {
                 if (s.Reconnecting) s.RetryNow?.TrySetResult(true);
@@ -3169,7 +3360,7 @@ internal sealed class MainForm : Form
             center.Controls.Add(buttons, 0, 2);
             panel.Controls.Add(center);
             panel.Tag = label;
-            s.Page.Controls.Add(panel);
+            ContentHost(s).Controls.Add(panel);
             s.Overlay = panel;
             ApplyTheme();   // the overlay's buttons and colours, like the rest of the window
         }
@@ -3187,6 +3378,13 @@ internal sealed class MainForm : Form
         try { s.Vnc?.Dispose(); } catch { }
         if (s.Inst?.Saved != null) _adHocPasswords.Remove(s.Inst.Saved.Id);
         try { (s.Docked ? _dockTabs : _tabs).TabPages.Remove(s.Page); } catch { }
+        if (s.Popout != null)
+        {
+            var window = s.Popout;
+            s.Popout = null;
+            window.ClosingQuietly = true;
+            try { window.Close(); window.Dispose(); } catch { }
+        }
         try { s.Page.Dispose(); } catch { }
         s.Tunnel?.Dispose(); // saved connections have no tunnel
         UpdateMainTabsVisibility();
@@ -3380,6 +3578,11 @@ internal sealed class MainForm : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        foreach (var s in _sessions.Where(x => x.Popout != null).ToList())
+        {
+            s.Popout.ClosingQuietly = true;
+            try { s.Popout.Close(); } catch { }
+        }
         foreach (var f in _forwards) { try { f.Tunnel?.Dispose(); } catch { } }
         _forwards.Clear();
         SingleInstance.ActivateRequested -= OnActivateRequested;
@@ -3402,20 +3605,51 @@ internal sealed class MainForm : Form
             case SessionSwitchReason.ConsoleDisconnect:
             case SessionSwitchReason.RemoteDisconnect:
                 PauseBackgroundSignIn("Windows was locked");
+                _locked = true;
                 break;
             case SessionSwitchReason.SessionUnlock:
             case SessionSwitchReason.ConsoleConnect:
             case SessionSwitchReason.RemoteConnect:
                 ResumeBackgroundSignIn("Windows was unlocked");
+                _locked = false;
+                ResumeReconnects("Windows was unlocked");
                 break;
         }
     });
 
     private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e) => OnUiThread(() =>
     {
-        if (e.Mode == PowerModes.Suspend) PauseBackgroundSignIn("the PC is going to sleep");
-        else if (e.Mode == PowerModes.Resume) ResumeBackgroundSignIn("the PC woke up");
+        if (e.Mode == PowerModes.Suspend) { PauseBackgroundSignIn("the PC is going to sleep"); _asleep = true; }
+        else if (e.Mode == PowerModes.Resume) { ResumeBackgroundSignIn("the PC woke up"); _asleep = false; ResumeReconnects("the PC woke up"); }
     });
+
+    private bool _locked, _asleep;
+
+    /// <summary>Windows is locked or the PC is asleep: reconnecting waits (no attempts counted).</summary>
+    private bool Away => _locked || _asleep;
+
+    /// <summary>
+    /// Unlocked or awake again: every tab waiting to reconnect starts a fresh round (attempt 1, now), and tabs whose
+    /// reconnecting gave up while nobody was there try again too.
+    /// </summary>
+    private void ResumeReconnects(string why)
+    {
+        if (Away) return;   // e.g. woke up, but still locked: wait for the unlock
+        foreach (var s in _sessions.Where(x => x.Rdp != null).ToList())
+        {
+            if (s.Reconnecting)
+            {
+                s.ReconnectAttempt = 0;
+                s.ReconnectUntil = DateTime.Now.AddMinutes(10);
+                s.RetryNow?.TrySetResult(true);
+            }
+            else if (s.Overlay is { Visible: true } && !IsDeliberateEnd(s))
+            {
+                _ = AutoReconnectAsync(s);   // it had given up: start again
+            }
+        }
+        Log.Write($"Reconnects resumed ({why})");
+    }
 
     private void OnUiThread(Action a)
     {

@@ -39,6 +39,8 @@ can reach it, without opening the AWS console.
 - Local shells in tabs: Command Prompt, Windows PowerShell, PowerShell 7, Git Bash and WSL distributions, each with
   its own icon. **Claude Code** in a terminal tab (with an installer if it's missing) and **claude.ai** in a tab.
 - Terminals can be docked in a panel under the tabs, beside whatever tab is in front.
+- **Any tab can pop out to its own window** (e.g. a Remote Desktop session on a second screen) without disconnecting,
+  and go back to its tab with one click. Popped-out windows come back where they were next time.
 - Tabs can be dragged into a new order. Remote tabs show where they connect: **AWS**, **RDP** or **SSH**.
 - **Your tabs and layout come back** next time: tabs reopen and reconnect, and the window, columns and panels are as
   you left them. Optionally, terminals show their previous output too.
@@ -159,7 +161,9 @@ Then click **Sign in**.
 
 - **Right-click a server** for Connect (and Connect with SSH / Remote Desktop / VNC), Connect as, Manage server, Port forwarding, New server like this one,
   Start / Stop / Reboot (on every selected server) and Terminate.
-- **Right-click a tab** for Reconnect, Send Ctrl+Alt+Del, Move left / right, Dock to bottom and Close.
+- **Right-click a tab** for Reconnect, Send Ctrl+Alt+Del, Move left / right, Pop out to own window, Dock to bottom
+  and Close. A popped-out window's bar has Return to main window, Full screen, Keep on top, Ctrl+Alt+Del and
+  Reconnect; its × closes the session.
 - **In terminals:** select text (or Ctrl+Shift+C) to copy, Ctrl+V or right-click to paste. When a session ends,
   Enter starts it again and Esc closes the tab.
 - **SSH keys:** `ssh` uses your keys in `%USERPROFILE%\.ssh`, the Windows SSH agent, your `~/.ssh/config`, or one key
